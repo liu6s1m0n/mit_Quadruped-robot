@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(mujoco_vendor REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
@@ -21,6 +22,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 ament_export_dependencies(rosidl_default_runtime)
 ament_export_dependencies(Eigen3)
+ament_export_dependencies(mujoco_vendor)
 ament_export_include_directories(include)
 
 # 安装供其他节点和功能包使用的公共头文件
@@ -41,8 +43,52 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+# 与 ROS 2/MuJoCo 解耦的 GO1 数学模型参数库
+add_library(mymit_robot_model
+  src/model/quadruped.cpp
+  src/sensor/sim_imu.cpp
+)
+target_compile_features(mymit_robot_model PUBLIC cxx_std_17)
+target_include_directories(mymit_robot_model PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(mymit_robot_model PUBLIC Eigen3::Eigen mujoco::mujoco)
+
+install(TARGETS mymit_robot_model
+  EXPORT mymit_robot_model_targets
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+ament_export_targets(mymit_robot_model_targets HAS_LIBRARY_TARGET)
+ament_export_libraries(mymit_robot_model)
+
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
+
+  ament_add_gtest(test_quadruped
+    test/test_quadruped.cpp
+  )
+  target_link_libraries(test_quadruped
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_imu
+    test/test_imu.cpp
+  )
+  target_compile_definitions(test_imu PRIVATE
+    MYMIT_ROBOT_TEST_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
+  )
+  target_link_libraries(test_imu
+    mymit_robot_model
+    Eigen3::Eigen
+    mujoco::mujoco
+  )
+
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)

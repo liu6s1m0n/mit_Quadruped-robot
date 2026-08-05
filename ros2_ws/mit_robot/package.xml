@@ -11,6 +11,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>geometry_msgs</depend>
+  <depend>mujoco_vendor</depend>
   <depend>std_msgs</depend>
   <depend>eigen</depend>
 
@@ -28,12 +29,12 @@
   <exec_depend>mujoco_ros2_control</exec_depend>
   <exec_depend>mujoco_ros2_control_msgs</exec_depend>
   <exec_depend>mujoco_ros2_control_plugins</exec_depend>
-  <exec_depend>mujoco_vendor</exec_depend>
 
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

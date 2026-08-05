@@ -1,3 +1,10 @@
+"""
+Launch the GO1 MuJoCo model with ros2_control.
+
+Run ``ros2 launch mymit_robot ros2_control.launch.py`` for the controlled
+simulation. Use ``display.launch.py`` to open only the native MuJoCo model.
+"""
+
 import os
 
 from launch import LaunchDescription

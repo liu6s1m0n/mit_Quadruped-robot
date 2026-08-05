@@ -221,6 +221,12 @@
     <position class="knee" name="RL_calf" joint="RL_calf_joint"/>
   </actuator>
 
+  <sensor>
+    <framequat name="imu_orientation" objtype="site" objname="imu"/>
+    <gyro name="imu_angular_velocity" site="imu"/>
+    <accelerometer name="imu_linear_acceleration" site="imu"/>
+  </sensor>
+
   <keyframe>
     <key name="home" qpos="0 0 0.27 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8"
       ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8"/>
