@@ -1,0 +1,9 @@
+# ROS 2/colcon 生成目录
+/ros2_ws/build/
+/ros2_ws/install/
+/ros2_ws/log/
+
+# 编辑器和 Python 缓存
+/.vscode/
+**/__pycache__/
+*.pyc

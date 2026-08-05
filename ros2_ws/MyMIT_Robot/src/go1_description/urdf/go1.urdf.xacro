@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<robot name="go1" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!--
+    ROS 2 only uses this lightweight tree for TF and ros2_control interfaces.
+    MuJoCo physics and rendering continue to come directly from unitree_go1/scene.xml.
+  -->
+  <xacro:arg name="headless" default="false"/>
+
+  <xacro:property name="hip_x" value="0.1881"/>
+  <xacro:property name="hip_y" value="0.04675"/>
+  <xacro:property name="hip_offset" value="0.08"/>
+  <xacro:property name="upper_leg" value="0.213"/>
+  <xacro:property name="lower_leg" value="0.213"/>
+
+  <link name="base_link"/>
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:macro name="go1_leg" params="prefix x y side">
+    <link name="${prefix}_hip_link"/>
+    <link name="${prefix}_thigh_link"/>
+    <link name="${prefix}_calf_link"/>
+    <link name="${prefix}_foot_link"/>
+
+    <joint name="${prefix}_hip_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="${prefix}_hip_link"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="1 0 0"/>
+      <limit lower="-0.863" upper="0.863" effort="23.7" velocity="30.1"/>
+    </joint>
+    <joint name="${prefix}_thigh_joint" type="revolute">
+      <parent link="${prefix}_hip_link"/>
+      <child link="${prefix}_thigh_link"/>
+      <origin xyz="0 ${side * hip_offset} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-0.686" upper="4.501" effort="23.7" velocity="30.1"/>
+    </joint>
+    <joint name="${prefix}_calf_joint" type="revolute">
+      <parent link="${prefix}_thigh_link"/>
+      <child link="${prefix}_calf_link"/>
+      <origin xyz="0 0 -${upper_leg}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-2.818" upper="-0.888" effort="35.55" velocity="20.06"/>
+    </joint>
+    <joint name="${prefix}_foot_joint" type="fixed">
+      <parent link="${prefix}_calf_link"/>
+      <child link="${prefix}_foot_link"/>
+      <origin xyz="0 0 -${lower_leg}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Keep the same body order as the unmodified Menagerie MJCF. -->
+  <xacro:go1_leg prefix="FR" x="${hip_x}" y="${-hip_y}" side="-1"/>
+  <xacro:go1_leg prefix="FL" x="${hip_x}" y="${hip_y}" side="1"/>
+  <xacro:go1_leg prefix="RR" x="${-hip_x}" y="${-hip_y}" side="-1"/>
+  <xacro:go1_leg prefix="RL" x="${-hip_x}" y="${hip_y}" side="1"/>
+
+  <xacro:include filename="$(find mymit_robot)/urdf/go1_ros2_control.xacro"/>
+  <xacro:go1_ros2_control headless="$(arg headless)"/>
+</robot>

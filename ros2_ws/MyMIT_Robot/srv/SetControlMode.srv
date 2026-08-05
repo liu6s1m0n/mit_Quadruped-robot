@@ -1,0 +1,19 @@
+# 请求切换到的控制模式
+# 0: PASSIVE（被动）
+# 1: JOINT_PD（关节位置控制）
+# 2: BALANCE_STAND（平衡站立）
+# 3: LOCOMOTION（行走）
+uint8 mode
+
+# 是否允许绕过常规状态转换检查
+bool force
+
+---
+# 是否成功切换
+bool success
+
+# 当前实际控制模式，编号与请求中的 mode 定义相同
+uint8 current_mode
+
+# 状态切换结果或失败原因
+string message
