@@ -340,3 +340,6 @@ template class LegController<float>;
 template void computeLegJacobianAndPosition<float>(
   const Quadruped<float> &, const Vec3<float> &,
   Mat3<float> *, Vec3<float> *, LegId);
+template void computeLegJacobianAndPosition<double>(
+  const Quadruped<double> &, const Vec3<double> &,
+  Mat3<double> *, Vec3<double> *, LegId);

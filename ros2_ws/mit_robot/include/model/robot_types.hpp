@@ -83,8 +83,9 @@ enum class ControlMode : std::uint8_t
 /**
  * @brief IMU 的一次采样。
  *
- * orientation_world_from_body 表示从机身坐标系旋转到世界坐标系的姿态，
- * Eigen 构造顺序为 (w, x, y, z)。角速度和线加速度均在 IMU/机身坐标系中；
+ * orientation_world_from_body 是 IMU 内部或仿真器已解算的姿态，
+ * 表示从机身坐标系旋转到世界坐标系，Eigen 构造顺序为 (w, x, y, z)。
+ * 角速度和线加速度均在 IMU/机身坐标系中；
  * acceleration_body 是否包含重力由接入层统一处理，控制算法内不得混用。
  */
 template<typename T>

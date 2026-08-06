@@ -1,0 +1,169 @@
+#include <array>
+#include <cmath>
+
+#include <gtest/gtest.h>
+
+#include "controller/PositionVelocityEstimator.hpp"
+
+namespace
+{
+
+class FakeImu : public ImuSensor
+{
+public:
+  ImuData<float> read() override
+  {
+    ++read_count;
+    imu = sample;
+    return imu;
+  }
+
+  ImuData<float> sample;
+  int read_count = 0;
+};
+
+class FakeLeg : public LegSensor
+{
+public:
+  explicit FakeLeg(LegId leg_id)
+  {
+    sample.leg = leg_id;
+  }
+
+  JointState<float> read() override
+  {
+    ++read_count;
+    leg = sample;
+    return leg;
+  }
+
+  JointState<float> sample;
+  int read_count = 0;
+};
+
+struct SensorFixture
+{
+  SensorFixture()
+  : quadruped(makeQuadruped<float>(RobotType::UNITREE_GO1)),
+    legs{
+      FakeLeg(LegId::FR), FakeLeg(LegId::FL),
+      FakeLeg(LegId::RR), FakeLeg(LegId::RL)}
+  {
+    imu.sample.orientation_world_from_body = Eigen::Quaternionf::Identity();
+    imu.sample.angular_velocity_body.setZero();
+    imu.sample.acceleration_body << 0.0F, 0.0F, 9.81F;
+    imu.sample.timestamp = 1.0F;
+    imu.sample.valid = true;
+
+    for (std::size_t index = 0; index < kNumLegs; ++index) {
+      const LegId leg_id = static_cast<LegId>(index);
+      legs[index].sample.leg = leg_id;
+      legs[index].sample.position = quadruped.leg(leg_id).joints.home_position;
+      legs[index].sample.velocity.setZero();
+      legs[index].sample.torque_estimate.setZero();
+      legs[index].sample.timestamp = 1.0F;
+      legs[index].sample.valid = true;
+    }
+  }
+
+  PositionVelocityEstimator<float>::LegSensors legPointers()
+  {
+    PositionVelocityEstimator<float>::LegSensors result{};
+    for (std::size_t index = 0; index < kNumLegs; ++index) {
+      result[index] = &legs[index];
+    }
+    return result;
+  }
+
+  void advance(float time_step)
+  {
+    imu.sample.timestamp += time_step;
+    for (auto & leg : legs) {
+      leg.sample.timestamp += time_step;
+    }
+  }
+
+  Quadruped<float> quadruped;
+  FakeImu imu;
+  std::array<FakeLeg, kNumLegs> legs;
+};
+
+}  // namespace
+
+TEST(PositionVelocityEstimatorTest, InitializesStandingHeightFromLegKinematics)
+{
+  SensorFixture fixture;
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::SIMULATION_TRUTH);
+
+  ASSERT_TRUE(estimator.run());
+
+  EXPECT_TRUE(estimator.result().valid);
+  EXPECT_NEAR(
+    estimator.result().position_world.z(),
+    fixture.quadruped.nominalBodyHeight(), 0.02F);
+  EXPECT_TRUE(estimator.result().velocity_world.isZero(1e-5F));
+  EXPECT_EQ(fixture.imu.read_count, 1);
+  for (const auto & leg : fixture.legs) {
+    EXPECT_EQ(leg.read_count, 1);
+  }
+}
+
+TEST(PositionVelocityEstimatorTest, KeepsStaticStandingRobotStable)
+{
+  SensorFixture fixture;
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::SIMULATION_TRUTH);
+  ASSERT_TRUE(estimator.run());
+  const float initial_height = estimator.result().position_world.z();
+
+  for (int step = 0; step < 100; ++step) {
+    fixture.advance(0.002F);
+    ASSERT_TRUE(estimator.run());
+  }
+
+  EXPECT_NEAR(estimator.result().position_world.z(), initial_height, 0.01F);
+  EXPECT_TRUE(estimator.result().velocity_world.isZero(0.02F));
+}
+
+TEST(PositionVelocityEstimatorTest, RejectsInvalidLegFrame)
+{
+  SensorFixture fixture;
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::IMU_FUSION);
+  fixture.legs[1].sample.valid = false;
+
+  EXPECT_FALSE(estimator.run());
+  EXPECT_FALSE(estimator.result().valid);
+}
+
+TEST(PositionVelocityEstimatorTest, UsesDirectImuAngleThroughOrientationEstimator)
+{
+  SensorFixture fixture;
+  fixture.imu.sample.orientation_world_from_body = Eigen::Quaternionf(
+    Eigen::AngleAxisf(0.6F, Vec3<float>::UnitZ()));
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::IMU_FUSION);
+
+  ASSERT_TRUE(estimator.run());
+  EXPECT_NEAR(estimator.result().rpy.z(), 0.6F, 1e-5F);
+}
+
+TEST(PositionVelocityEstimatorTest, AcceptsAndClampsContactProbabilities)
+{
+  SensorFixture fixture;
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::SIMULATION_TRUTH);
+
+  PositionVelocityEstimator<float>::ContactProbabilities probabilities{
+    1.0F, 0.0F, 1.2F, -0.2F};
+  estimator.setContactProbabilities(probabilities);
+  ASSERT_TRUE(estimator.run());
+  fixture.advance(0.002F);
+  EXPECT_TRUE(estimator.run());
+}

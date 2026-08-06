@@ -137,8 +137,8 @@ int SimImu::requireSensor(
 
 ImuData<float> HardwareImu::read()
 {
-  // TODO(real-hardware)：接入真实 IMU（如 BMI088 / MPU6500）驱动后，
-  // 从这里读取并返回真实数据。
+  // TODO(real-hardware)：接入可输出姿态角/角速度的真实 IMU 驱动后，
+  // 在这里将设备姿态转换为 orientation_world_from_body，并填充其余数据。
   // 当前尚未实现，统一返回无效数据，避免调用方误用占位值。
   imu = ImuData<float>{};
   return imu;

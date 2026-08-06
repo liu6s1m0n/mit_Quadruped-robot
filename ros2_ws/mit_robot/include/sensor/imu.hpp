@@ -28,7 +28,9 @@ enum class ImuSource : std::uint8_t
 /**
  * @brief 统一的 IMU 数据源接口。
  *
- * 仿真器与真实硬件各自实现 read()，返回相同格式的 ImuData<float>；
+ * 仿真器与真实硬件各自实现 read()，返回相同格式的 ImuData<float>。
+ * 硬件实现应把设备输出的姿态角转换为 orientation_world_from_body，
+ * 而不是只上传原始陀螺仪数据交给 OrientationEstimator 积分；
  * 每次读取的结果都会保存到成员 imu 中，供控制循环直接访问。
  */
 class ImuSensor
@@ -102,7 +104,7 @@ private:
  * @brief 真实硬件 IMU 数据源（占位实现，尚未完成）。
  *
  * 当前 read() 始终返回无效数据（valid == false），避免调用方误用占位值；
- * 接入真实 IMU（如 BMI088 / MPU6500）后在此实现驱动读取。
+ * 接入可输出姿态角和角速度的真实 IMU 后在此实现驱动读取。
  */
 class HardwareImu : public ImuSensor
 {

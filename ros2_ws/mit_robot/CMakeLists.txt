@@ -45,7 +45,10 @@ install(DIRECTORY
 
 # 与 ROS 2/MuJoCo 解耦的 GO1 数学模型参数库
 add_library(mymit_robot_model
+  src/controller/ContactEstimator.cpp
   src/controller/FootSwingTrajectory.cpp
+  src/controller/OrientationEstimator.cpp
+  src/controller/PositionVelocityEstimator.cpp
   src/controller/leg_controller.cpp
   src/model/quadruped.cpp
   src/sensor/imu.cpp
@@ -73,6 +76,7 @@ ament_export_libraries(mymit_robot_model)
 # 直接编译传感器源文件，避免与 mymit_robot_model 链入的两套 libmujoco 冲突。
 add_executable(mymit_robot_user
   user/main.cpp
+  src/controller/ContactEstimator.cpp
   src/controller/leg_controller.cpp
   src/model/quadruped.cpp
   src/sensor/imu.cpp
@@ -140,10 +144,38 @@ if(BUILD_TESTING)
     test/test_leg_controller.cpp
   )
 
+  ament_add_gtest(test_contact_estimator
+    test/test_contact_estimator.cpp
+  )
+  target_compile_definitions(test_contact_estimator PRIVATE
+    MYMIT_ROBOT_TEST_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
+  )
+  target_link_libraries(test_contact_estimator
+    mymit_robot_model
+    Eigen3::Eigen
+    mujoco::mujoco
+  )
+
   ament_add_gtest(test_foot_swing_trajectory
     test/test_foot_swing_trajectory.cpp
   )
   target_link_libraries(test_foot_swing_trajectory
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_orientation_estimator
+    test/test_orientation_estimator.cpp
+  )
+  target_link_libraries(test_orientation_estimator
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_position_velocity_estimator
+    test/test_position_velocity_estimator.cpp
+  )
+  target_link_libraries(test_position_velocity_estimator
     mymit_robot_model
     Eigen3::Eigen
   )
