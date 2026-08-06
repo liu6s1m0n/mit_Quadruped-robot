@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <mujoco/mujoco.h>
 
-#include "sensor/sim_imu.hpp"
+#include "sensor/imu.hpp"
 
 namespace
 {
@@ -31,13 +31,13 @@ int sensorAddress(const mjModel * model, const char * name)
 
 }  // namespace
 
-TEST(ImuTest, ReadsMujocoSensorData)
+TEST(ImuTest, SimImuReadsMujocoSensorData)
 {
   auto model = loadGo1Model();
   DataPointer data(mj_makeData(model.get()), &mj_deleteData);
   ASSERT_NE(data, nullptr);
 
-  Imu imu(model.get());
+  SimImu imu(model.get(), data.get());
   const int orientation = sensorAddress(model.get(), "imu_orientation");
   const int angular_velocity = sensorAddress(model.get(), "imu_angular_velocity");
   const int acceleration = sensorAddress(model.get(), "imu_linear_acceleration");
@@ -54,23 +54,27 @@ TEST(ImuTest, ReadsMujocoSensorData)
   data->sensordata[acceleration + 2] = 6.0;
   data->time = 1.25;
 
-  const auto sample = imu.read(data.get());
+  const auto sample = imu.read();
 
   EXPECT_TRUE(sample.valid);
   EXPECT_DOUBLE_EQ(sample.orientation_world_from_body.w(), 1.0);
   EXPECT_TRUE(sample.angular_velocity_body.isApprox(Vec3<float>(1.0, 2.0, 3.0)));
   EXPECT_TRUE(sample.acceleration_body.isApprox(Vec3<float>(4.0, 5.0, 6.0)));
   EXPECT_DOUBLE_EQ(sample.timestamp, 1.25);
+
+  // 读取结果应同时保存到成员 imu 中
+  EXPECT_TRUE(imu.imu.valid);
+  EXPECT_TRUE(imu.imu.angular_velocity_body.isApprox(Vec3<float>(1.0, 2.0, 3.0)));
 }
 
-TEST(ImuTest, ReadsLiveSimulationSample)
+TEST(ImuTest, SimImuReadsLiveSimulationSample)
 {
   auto model = loadGo1Model();
   DataPointer data(mj_makeData(model.get()), &mj_deleteData);
   ASSERT_NE(data, nullptr);
 
   mj_forward(model.get(), data.get());
-  const auto sample = Imu(model.get()).read(data.get());
+  const auto sample = SimImu(model.get(), data.get()).read();
 
   EXPECT_TRUE(sample.valid);
   EXPECT_TRUE(sample.orientation_world_from_body.coeffs().allFinite());
@@ -79,8 +83,39 @@ TEST(ImuTest, ReadsLiveSimulationSample)
   EXPECT_DOUBLE_EQ(sample.timestamp, data->time);
 }
 
-TEST(ImuTest, RejectsMissingSensors)
+TEST(ImuTest, SimImuRejectsMissingSensors)
 {
   auto model = loadGo1Model();
-  EXPECT_THROW(Imu(model.get(), "missing_orientation"), std::invalid_argument);
+  DataPointer data(mj_makeData(model.get()), &mj_deleteData);
+  EXPECT_THROW(
+    SimImu(model.get(), data.get(), "missing_orientation"),
+    std::invalid_argument);
+}
+
+TEST(ImuTest, HardwareImuIsPlaceholderReturningInvalidData)
+{
+  HardwareImu imu;
+  const auto sample = imu.read();
+
+  // 硬件尚未实现，必须返回无效数据，且保存到成员 imu 中
+  EXPECT_FALSE(sample.valid);
+  EXPECT_FALSE(imu.imu.valid);
+}
+
+TEST(ImuTest, FactorySelectsBetweenSimulatorAndHardware)
+{
+  auto model = loadGo1Model();
+  DataPointer data(mj_makeData(model.get()), &mj_deleteData);
+  ASSERT_NE(data, nullptr);
+
+  // 仿真器来源：能读到有效数据
+  auto sim = makeImu(ImuSource::SIMULATOR, model.get(), data.get());
+  ASSERT_NE(sim, nullptr);
+  mj_forward(model.get(), data.get());
+  EXPECT_TRUE(sim->read().valid);
+
+  // 硬件来源：当前为占位实现，返回无效数据
+  auto hw = makeImu(ImuSource::HARDWARE, nullptr, nullptr);
+  ASSERT_NE(hw, nullptr);
+  EXPECT_FALSE(hw->read().valid);
 }

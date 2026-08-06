@@ -45,8 +45,11 @@ install(DIRECTORY
 
 # 与 ROS 2/MuJoCo 解耦的 GO1 数学模型参数库
 add_library(mymit_robot_model
+  src/controller/FootSwingTrajectory.cpp
+  src/controller/leg_controller.cpp
   src/model/quadruped.cpp
-  src/sensor/sim_imu.cpp
+  src/sensor/imu.cpp
+  src/sensor/leg.cpp
 )
 target_compile_features(mymit_robot_model PUBLIC cxx_std_17)
 target_include_directories(mymit_robot_model PUBLIC
@@ -64,6 +67,38 @@ install(TARGETS mymit_robot_model
 
 ament_export_targets(mymit_robot_model_targets HAS_LIBRARY_TARGET)
 ament_export_libraries(mymit_robot_model)
+
+# 用户示例可执行程序（GUI 版）：MuJoCo 内置窗口 + 实时打印 IMU 读取的机器人参数
+# 使用 /usr/local 完整版 MuJoCo(3.11)，它才包含 Simulate 图形界面(libsimulate.a)。
+# 直接编译传感器源文件，避免与 mymit_robot_model 链入的两套 libmujoco 冲突。
+add_executable(mymit_robot_user
+  user/main.cpp
+  src/controller/leg_controller.cpp
+  src/model/quadruped.cpp
+  src/sensor/imu.cpp
+  src/sensor/leg.cpp
+)
+target_compile_definitions(mymit_robot_user PRIVATE
+  MYMIT_ROBOT_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
+)
+target_include_directories(mymit_robot_user PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_include_directories(mymit_robot_user SYSTEM PRIVATE
+  /usr/local/include
+  /usr/local/include/simulate
+)
+target_link_libraries(mymit_robot_user
+  Eigen3::Eigen
+  /usr/local/lib/libmujoco.so
+  /usr/local/lib/libsimulate.a
+  glfw
+  dl
+  pthread
+)
+install(TARGETS mymit_robot_user
+  RUNTIME DESTINATION bin
+)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -87,6 +122,34 @@ if(BUILD_TESTING)
     mymit_robot_model
     Eigen3::Eigen
     mujoco::mujoco
+  )
+
+  ament_add_gtest(test_leg
+    test/test_leg.cpp
+  )
+  target_compile_definitions(test_leg PRIVATE
+    MYMIT_ROBOT_TEST_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
+  )
+  target_link_libraries(test_leg
+    mymit_robot_model
+    Eigen3::Eigen
+    mujoco::mujoco
+  )
+
+  ament_add_gtest(test_leg_controller
+    test/test_leg_controller.cpp
+  )
+
+  ament_add_gtest(test_foot_swing_trajectory
+    test/test_foot_swing_trajectory.cpp
+  )
+  target_link_libraries(test_foot_swing_trajectory
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+  target_link_libraries(test_leg_controller
+    mymit_robot_model
+    Eigen3::Eigen
   )
 
   # the following line skips the linter which checks for copyrights
