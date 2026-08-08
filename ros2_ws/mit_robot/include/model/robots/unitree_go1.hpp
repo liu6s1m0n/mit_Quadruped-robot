@@ -9,6 +9,7 @@
 #define MYMIT_ROBOT_MODEL_ROBOTS_UNITREE_GO1_HPP_
 
 #include "model/quadruped.hpp"
+#include "model/floating_base_model_factory.hpp"
 
 namespace robots
 {
@@ -106,6 +107,13 @@ Quadruped<T> makeModel()
     LegId::RL, Vec3<T>(T(-0.1881), T(0.04675), T(0)), true, true);
 
   return Quadruped<T>(RobotType::UNITREE_GO1, body, legs, T(0.27));
+}
+
+/** Build the WBC dynamics tree from the same factual GO1 parameter set. */
+template<typename T>
+FloatingBaseModel<T> makeFloatingBaseModel()
+{
+  return model::makeFloatingBaseModel(makeModel<T>());
 }
 
 }  // namespace unitree_go1

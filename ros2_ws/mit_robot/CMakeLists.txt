@@ -45,8 +45,14 @@ install(DIRECTORY
 
 # 与 ROS 2/MuJoCo 解耦的 GO1 数学模型参数库
 add_library(mymit_robot_model
+  src/Array.cc
+  src/QuadProg++.cc
+  src/WBC/FloatingBaseModel.cpp
+  src/WBC/KinWBC.cpp
+  src/WBC/WBIC.cpp
   src/controller/ContactEstimator.cpp
   src/controller/FootSwingTrajectory.cpp
+  src/controller/GaitScheduler.cpp
   src/controller/OrientationEstimator.cpp
   src/controller/PositionVelocityEstimator.cpp
   src/controller/leg_controller.cpp
@@ -164,6 +170,14 @@ if(BUILD_TESTING)
     Eigen3::Eigen
   )
 
+  ament_add_gtest(test_gait_scheduler
+    test/test_gait_scheduler.cpp
+  )
+  target_link_libraries(test_gait_scheduler
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
   ament_add_gtest(test_orientation_estimator
     test/test_orientation_estimator.cpp
   )
@@ -180,6 +194,22 @@ if(BUILD_TESTING)
     Eigen3::Eigen
   )
   target_link_libraries(test_leg_controller
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_floating_base_model
+    test/test_floating_base_model.cpp
+  )
+  target_link_libraries(test_floating_base_model
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_wbc
+    test/test_wbc.cpp
+  )
+  target_link_libraries(test_wbc
     mymit_robot_model
     Eigen3::Eigen
   )
