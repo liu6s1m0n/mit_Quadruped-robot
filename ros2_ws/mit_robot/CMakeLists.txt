@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(mujoco_vendor REQUIRED)
+find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
@@ -17,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/FootContact.msg"
   "msg/StateEstimate.msg"
   "srv/SetControlMode.srv"
+  "srv/SetStandingHeight.srv"
   DEPENDENCIES geometry_msgs std_msgs
 )
 
@@ -28,6 +30,14 @@ ament_export_include_directories(include)
 # 安装供其他节点和功能包使用的公共头文件
 install(DIRECTORY include/
   DESTINATION include
+  PATTERN "MPC/common_types.h" EXCLUDE
+  PATTERN "MPC/convexMPC_interface.h" EXCLUDE
+  PATTERN "WBC/WBC_Ctrl/BodyOriTask.hpp" EXCLUDE
+  PATTERN "WBC/WBC_Ctrl/BodyPosTask.hpp" EXCLUDE
+  PATTERN "WBC/WBC_Ctrl/BodyPostureTask.hpp" EXCLUDE
+  PATTERN "WBC/WBC_Ctrl/BodyRyRzTask.hpp" EXCLUDE
+  PATTERN "WBC/WBC_Ctrl/FixedBodyContact.hpp" EXCLUDE
+  PATTERN "WBC/WBC_Ctrl/SingleContact.hpp" EXCLUDE
 )
 
 # 安装 ROS 2 启动文件
@@ -43,12 +53,38 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Use one MuJoCo ABI for the model library, sensors, tests, and GUI. The local
+# 3.11 installation also provides the Simulate UI used by mymit_robot_user.
+set(MYMIT_LOCAL_MUJOCO_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/local_mujoco_include")
+file(MAKE_DIRECTORY "${MYMIT_LOCAL_MUJOCO_INCLUDE}")
+if(NOT EXISTS "${MYMIT_LOCAL_MUJOCO_INCLUDE}/mujoco")
+  file(CREATE_LINK
+    /usr/local/include/mujoco
+    "${MYMIT_LOCAL_MUJOCO_INCLUDE}/mujoco"
+    SYMBOLIC
+  )
+endif()
+
 # 与 ROS 2/MuJoCo 解耦的 GO1 数学模型参数库
 add_library(mymit_robot_model
   src/Array.cc
+  src/MPC/ConvexMPCLocomotion.cpp
+  src/MPC/Gait.cpp
+  src/MPC/RobotState.cpp
+  src/MPC/SolverMPC.cpp
   src/QuadProg++.cc
+  src/FSM/ControlFSM.cpp
+  src/FSM/FSM_State_BalanceStand.cpp
+  src/FSM/FSM_State_Locomotion.cpp
   src/WBC/FloatingBaseModel.cpp
   src/WBC/KinWBC.cpp
+  src/WBC/LocomotionCtrl/LocomotionCtrl.cpp
+  src/WBC/WBC_Ctrl/BodyOriTask.cpp
+  src/WBC/WBC_Ctrl/BodyPosTask.cpp
+  src/WBC/ContactSet/FixedBodyContact.cpp
+  src/WBC/WBC_Ctrl/LinkPosTask.cpp
+  src/WBC/ContactSet/SingleContact.cpp
+  src/WBC/WBC_Ctrl/WBC_Ctrl.cpp
   src/WBC/WBIC.cpp
   src/controller/ContactEstimator.cpp
   src/controller/FootSwingTrajectory.cpp
@@ -61,11 +97,17 @@ add_library(mymit_robot_model
   src/sensor/leg.cpp
 )
 target_compile_features(mymit_robot_model PUBLIC cxx_std_17)
+target_include_directories(mymit_robot_model BEFORE PRIVATE
+  "${MYMIT_LOCAL_MUJOCO_INCLUDE}"
+)
 target_include_directories(mymit_robot_model PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(mymit_robot_model PUBLIC Eigen3::Eigen mujoco::mujoco)
+target_link_libraries(mymit_robot_model PUBLIC
+  Eigen3::Eigen
+  /usr/local/lib/libmujoco.so
+)
 
 install(TARGETS mymit_robot_model
   EXPORT mymit_robot_model_targets
@@ -77,28 +119,28 @@ install(TARGETS mymit_robot_model
 ament_export_targets(mymit_robot_model_targets HAS_LIBRARY_TARGET)
 ament_export_libraries(mymit_robot_model)
 
-# 用户示例可执行程序（GUI 版）：MuJoCo 内置窗口 + 实时打印 IMU 读取的机器人参数
-# 使用 /usr/local 完整版 MuJoCo(3.11)，它才包含 Simulate 图形界面(libsimulate.a)。
-# 直接编译传感器源文件，避免与 mymit_robot_model 链入的两套 libmujoco 冲突。
+# MuJoCo GUI application. main only starts SimulationBridge; RobotRunner owns
+# the complete estimator -> FSM -> MPC/WBC -> LegController control pipeline.
 add_executable(mymit_robot_user
   user/main.cpp
-  src/controller/ContactEstimator.cpp
-  src/controller/leg_controller.cpp
-  src/model/quadruped.cpp
-  src/sensor/imu.cpp
-  src/sensor/leg.cpp
+  user/RobotRunner.cpp
+  user/SimulationBridge.cpp
 )
 target_compile_definitions(mymit_robot_user PRIVATE
   MYMIT_ROBOT_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
 )
 target_include_directories(mymit_robot_user PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/user
+)
+target_include_directories(mymit_robot_user BEFORE PRIVATE
+  "${MYMIT_LOCAL_MUJOCO_INCLUDE}"
 )
 target_include_directories(mymit_robot_user SYSTEM PRIVATE
-  /usr/local/include
   /usr/local/include/simulate
 )
 target_link_libraries(mymit_robot_user
+  mymit_robot_model
   Eigen3::Eigen
   /usr/local/lib/libmujoco.so
   /usr/local/lib/libsimulate.a
@@ -106,8 +148,21 @@ target_link_libraries(mymit_robot_user
   dl
   pthread
 )
-install(TARGETS mymit_robot_user
-  RUNTIME DESTINATION bin
+add_executable(mymit_robot_height_service
+  user/StandingHeightService.cpp
+)
+target_compile_features(mymit_robot_height_service PRIVATE cxx_std_17)
+target_include_directories(mymit_robot_height_service PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/user
+)
+ament_target_dependencies(mymit_robot_height_service rclcpp)
+rosidl_get_typesupport_target(mymit_robot_height_service_typesupport
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(mymit_robot_height_service
+  "${mymit_robot_height_service_typesupport}"
+)
+install(TARGETS mymit_robot_user mymit_robot_height_service
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
@@ -131,7 +186,6 @@ if(BUILD_TESTING)
   target_link_libraries(test_imu
     mymit_robot_model
     Eigen3::Eigen
-    mujoco::mujoco
   )
 
   ament_add_gtest(test_leg
@@ -143,7 +197,6 @@ if(BUILD_TESTING)
   target_link_libraries(test_leg
     mymit_robot_model
     Eigen3::Eigen
-    mujoco::mujoco
   )
 
   ament_add_gtest(test_leg_controller
@@ -159,7 +212,6 @@ if(BUILD_TESTING)
   target_link_libraries(test_contact_estimator
     mymit_robot_model
     Eigen3::Eigen
-    mujoco::mujoco
   )
 
   ament_add_gtest(test_foot_swing_trajectory
@@ -207,9 +259,27 @@ if(BUILD_TESTING)
   )
 
   ament_add_gtest(test_wbc
+    test/test_link_pos_task.cpp
     test/test_wbc.cpp
+    test/test_wbc_ctrl.cpp
   )
   target_link_libraries(test_wbc
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_mpc
+    test/test_mpc.cpp
+  )
+  target_link_libraries(test_mpc
+    mymit_robot_model
+    Eigen3::Eigen
+  )
+
+  ament_add_gtest(test_fsm
+    test/test_fsm.cpp
+  )
+  target_link_libraries(test_fsm
     mymit_robot_model
     Eigen3::Eigen
   )

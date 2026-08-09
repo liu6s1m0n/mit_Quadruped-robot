@@ -109,11 +109,14 @@ public:
   size_t getNumDof() const noexcept {return _nDof;}
   size_t getNumActuatedDof() const noexcept {return _nDof >= 6 ? _nDof - 6 : 0;}
   size_t getNumGroundContacts() const noexcept {return _nGroundContact;}
+  const FBModelState<T> & getState() const noexcept {return _state;}
   const std::vector < uint64_t > & getFootIndices() const noexcept {return _footIndicesGC;}
   const std::vector < size_t > & getGroundContactParents() const noexcept {return _gcParent;}
   const std::vector < Vec3 < T >> & getGroundContactLocations() const noexcept {return _gcLocation;}
   const vectorAligned < D3Mat < T >> & getContactJacobians() const noexcept {return _Jc;}
   const vectorAligned < Vec3 < T >> & getContactJacobianDotQdot() const noexcept {return _Jcdqd;}
+  const std::vector<Vec3<T>> & getGroundContactPositions() const noexcept {return _pGC;}
+  const std::vector<Vec3<T>> & getGroundContactVelocities() const noexcept {return _vGC;}
 
   /*!
    * 获取父刚体索引数组，其中 parents[i] 是刚体 i 的父刚体。
@@ -204,6 +207,7 @@ public:
 
     resetCalculationFlags();
   }
+
 
   /*!
    * 将之前缓存的计算结果全部标记为失效。

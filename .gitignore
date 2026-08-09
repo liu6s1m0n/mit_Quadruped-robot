@@ -2,8 +2,40 @@
 /ros2_ws/build/
 /ros2_ws/install/
 /ros2_ws/log/
+/ros2_ws/build_*/
+/ros2_ws/install_*/
+/ros2_ws/log_*/
+
+# MuJoCo 运行时输出
+/ros2_ws/MJDATA.TXT
+/ros2_ws/MJMODEL.TXT
+/ros2_ws/MUJOCO_LOG.TXT
+/ros2_ws/screenshot*.png
+
+# CMake 和编译产物
+**/CMakeCache.txt
+**/CMakeFiles/
+**/CTestTestfile.cmake
+**/cmake_install.cmake
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.gcda
+*.gcno
+
+# 崩溃转储和调试临时文件
+core
+core.*
+*.core
+.gdb_history
 
 # 编辑器和 Python 缓存
 /.vscode/
+/.idea/
 **/__pycache__/
-*.pyc
+*.py[cod]
+*.swp
+*.swo
+*~

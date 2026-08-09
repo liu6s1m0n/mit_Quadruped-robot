@@ -1,0 +1,6 @@
+# Desired trunk height above the ground, in metres.
+float32 height
+---
+bool success
+float32 target_height
+string message
