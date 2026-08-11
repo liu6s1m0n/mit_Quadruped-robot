@@ -3,6 +3,8 @@
 # 1: JOINT_PD（关节位置控制）
 # 2: BALANCE_STAND（平衡站立）
 # 3: LOCOMOTION（行走）
+# 4: STAND_UP（平滑起立）
+# 5: RECOVERY_STAND（翻身恢复站立）
 uint8 mode
 
 # 是否允许绕过常规状态转换检查

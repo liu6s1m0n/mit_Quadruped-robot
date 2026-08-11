@@ -3,6 +3,9 @@
  *
  */
 
+// 空间惯量把质量、质心和转动惯量统一成 6×6 矩阵，供浮动基座刚体动力学使用。
+// 空间向量按“角运动在前、线运动在后”排列，阅读各矩阵分块时要保持这一约定。
+
 #ifndef LIBBIOMIMETICS_SPATIALINERTIA_H
 #define LIBBIOMIMETICS_SPATIALINERTIA_H
 

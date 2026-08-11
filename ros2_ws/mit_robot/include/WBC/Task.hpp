@@ -1,3 +1,7 @@
+/**
+ * @file Task.hpp
+ * @brief WBC 任务的抽象基类，统一保存任务雅可比、Jdot*qdot 和期望任务加速度。
+ */
 #ifndef WBC_TASK
 #define WBC_TASK
 

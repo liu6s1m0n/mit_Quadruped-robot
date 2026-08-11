@@ -1,3 +1,9 @@
+/**
+ * @file ContactSpec.hpp
+ * @brief WBC 接触约束的抽象接口。
+ *
+ * Jc 描述接触点速度与广义速度的关系，Uf 和不等式向量描述摩擦锥及法向力边界。
+ */
 #ifndef CONTACT_SPEC
 #define CONTACT_SPEC
 

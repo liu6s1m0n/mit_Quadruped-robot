@@ -1,3 +1,7 @@
+/**
+ * @file FSM_State_Locomotion.h
+ * @brief 行走状态：MPC 规划接触力和落脚运动，WBC 将结果转换为关节命令。
+ */
 #ifndef MYMIT_ROBOT_FSM_STATE_LOCOMOTION_H_
 #define MYMIT_ROBOT_FSM_STATE_LOCOMOTION_H_
 

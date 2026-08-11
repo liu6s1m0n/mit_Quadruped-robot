@@ -1,3 +1,7 @@
+/**
+ * @file BodyOriTask.hpp
+ * @brief 机身姿态任务，将四元数姿态误差转换为三维角加速度命令。
+ */
 #ifndef MYMIT_ROBOT_WBC_CTRL_BODY_ORI_TASK_HPP_
 #define MYMIT_ROBOT_WBC_CTRL_BODY_ORI_TASK_HPP_
 

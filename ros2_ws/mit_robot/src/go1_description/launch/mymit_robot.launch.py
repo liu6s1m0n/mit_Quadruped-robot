@@ -1,4 +1,4 @@
-"""Launch the native MuJoCo controller and its ROS 2 command gateway."""
+"""同时启动原生 MuJoCo 控制程序和用于接收 ROS 2 高度命令的服务节点."""
 
 from launch import LaunchDescription
 from launch.actions import Shutdown
@@ -6,6 +6,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    # 高度服务通过本地 IPC 把 ROS 2 请求转交给仿真进程；仿真退出时关闭整组节点。
     return LaunchDescription([
         Node(
             package="mymit_robot",

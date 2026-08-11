@@ -58,6 +58,8 @@ s.t.
  of the MIT license.  See the LICENSE file for details.
 */
 
+// 中文阅读提示：该第三方求解器由 WBIC 调用，用于求解带等式和不等式约束的凸二次规划。
+// 约束符号尤其重要：CE^T*x+ce0=0，CI^T*x+ci0>=0；不可行时返回无穷大。
 
 #ifndef _QUADPROGPP
 #define _QUADPROGPP

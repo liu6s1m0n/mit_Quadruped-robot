@@ -1,3 +1,9 @@
+/**
+ * @file StandingHeightIpc.hpp
+ * @brief MuJoCo 进程与 ROS 2 高度服务进程之间的轻量本地通信协议。
+ *
+ * 两个进程分离是为了避免本机 MuJoCo 3.11 与 rclcpp 的 C++ 符号冲突。
+ */
 #ifndef MYMIT_ROBOT_USER_STANDING_HEIGHT_IPC_HPP_
 #define MYMIT_ROBOT_USER_STANDING_HEIGHT_IPC_HPP_
 
@@ -27,8 +33,8 @@ inline sockaddr_un socketAddress() noexcept
 {
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
-  // An abstract-domain socket is removed automatically when the simulator
-  // exits and cannot collide with stale files in /tmp.
+  // Linux 抽象域 socket 不创建磁盘文件，仿真退出后由内核自动清理，
+  // 因此不会残留 /tmp 文件影响下一次启动。
   address.sun_path[0] = '\0';
   std::memcpy(address.sun_path + 1, kSocketName, sizeof(kSocketName) - 1);
   return address;

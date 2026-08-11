@@ -1,3 +1,4 @@
+// FSM 调度实现：安全检查优先于状态运行，任何无效状态或命令都会回到被动模式。
 #include "FSM/ControlFSM.h"
 
 #include <cmath>
@@ -14,16 +15,18 @@ FSM_StateName stateForMode(ControlMode mode) noexcept
     case ControlMode::JointPd: return FSM_StateName::JOINT_PD;
     case ControlMode::BalanceStand: return FSM_StateName::BALANCE_STAND;
     case ControlMode::Locomotion: return FSM_StateName::LOCOMOTION;
+    case ControlMode::StandUp: return FSM_StateName::STAND_UP;
+    case ControlMode::RecoveryStand: return FSM_StateName::RECOVERY_STAND;
   }
   return FSM_StateName::INVALID;
 }
 
 template<typename T>
-class BasicState final : public FSM_State<T>
+class JointPdState final : public FSM_State<T>
 {
 public:
-  BasicState(ControlFSMData<T> * data, FSM_StateName name, const char * label)
-  : FSM_State<T>(data, name, label) {}
+  explicit JointPdState(ControlFSMData<T> * data)
+  : FSM_State<T>(data, FSM_StateName::JOINT_PD, "JOINT_PD") {}
 
   void onEnter() override
   {
@@ -33,13 +36,9 @@ public:
 
   void run() override
   {
+    // 简单关节 PD 状态将四条腿保持在模型定义的默认姿态。
     auto & controller = *this->_data->leg_controller;
     controller.zeroCommand();
-    if (this->stateName == FSM_StateName::PASSIVE) {
-      controller.setEnabled(false);
-      return;
-    }
-
     controller.setEnabled(true);
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
       const LegId leg_id = static_cast<LegId>(leg);
@@ -85,12 +84,13 @@ ControlFSM<T>::ControlFSM(
   data.control_time_step = control_time_step;
   if (!data.valid()) {throw std::invalid_argument("invalid ControlFSM dependencies");}
 
-  statesList.passive = std::make_unique<BasicState<T>>(
-    &data, FSM_StateName::PASSIVE, "PASSIVE");
-  statesList.joint_pd = std::make_unique<BasicState<T>>(
-    &data, FSM_StateName::JOINT_PD, "JOINT_PD");
+  statesList.passive = std::make_unique<FSM_State_Passive<T>>(&data);
+  statesList.joint_pd = std::make_unique<JointPdState<T>>(&data);
+  statesList.stand_up = std::make_unique<FSM_State_StandUp<T>>(&data);
+  statesList.recovery_stand = std::make_unique<FSM_State_RecoveryStand<T>>(&data);
   statesList.balance_stand = std::make_unique<FSM_State_BalanceStand<T>>(&data);
   statesList.locomotion = std::make_unique<FSM_State_Locomotion<T>>(&data);
+  safety_checker_ = std::make_unique<SafetyChecker<T>>(&data);
   initialize();
 }
 
@@ -107,6 +107,7 @@ void ControlFSM<T>::initialize()
 template<typename T>
 void ControlFSM<T>::runFSM()
 {
+  // 前置检查针对输入状态；失败时立即进入 ESTOP，并输出被动命令。
   operating_mode_ = safetyPreCheck();
   if (operating_mode_ == FSM_OperatingMode::ESTOP) {
     if (currentState != statesList.passive.get()) {currentState->onExit();}
@@ -121,6 +122,7 @@ void ControlFSM<T>::runFSM()
   }
 
   if (operating_mode_ == FSM_OperatingMode::NORMAL) {
+    // 正常模式先询问当前状态是否需要切换；不切换才执行本状态控制。
     nextStateName = currentState->checkTransition();
     if (nextStateName != currentState->stateName) {
       nextState = getNextState(nextStateName);
@@ -135,6 +137,7 @@ void ControlFSM<T>::runFSM()
   }
 
   if (operating_mode_ == FSM_OperatingMode::TRANSITIONING) {
+    // transition() 由“旧状态”执行，完成后才调用旧状态 onExit 和新状态 onEnter。
     transitionData = currentState->transition();
     safetyPostCheck();
     if (transitionData.done) {
@@ -153,12 +156,12 @@ void ControlFSM<T>::runFSM()
 template<typename T>
 FSM_OperatingMode ControlFSM<T>::safetyPreCheck()
 {
+  // 1.4 rad 约等于 80 度；姿态过大时继续输出站立力矩可能让机器人翻转得更快。
   if (!data.state_estimate->valid || !data.state_estimate->rpy.allFinite()) {
     return FSM_OperatingMode::ESTOP;
   }
   if (currentState->checkSafeOrientation &&
-    (std::abs(data.state_estimate->rpy.x()) > T(1.4) ||
-    std::abs(data.state_estimate->rpy.y()) > T(1.4)))
+    !safety_checker_->checkSafeOrientation())
   {
     return FSM_OperatingMode::ESTOP;
   }
@@ -168,16 +171,27 @@ FSM_OperatingMode ControlFSM<T>::safetyPreCheck()
 template<typename T>
 FSM_OperatingMode ControlFSM<T>::safetyPostCheck()
 {
+  // 后置检查保护执行器：只要任一条腿出现 NaN/Inf，就关闭所有腿而不是部分输出。
   for (const auto & command : data.leg_controller->commands) {
     if (!command.position_desired.allFinite() ||
       !command.velocity_desired.allFinite() ||
       !command.torque_feedforward.allFinite() ||
-      !command.force_feedforward.allFinite())
+      !command.force_feedforward.allFinite() ||
+      !command.foot_position_desired.allFinite() ||
+      !command.foot_velocity_desired.allFinite() ||
+      !command.kp_joint.allFinite() || !command.kd_joint.allFinite() ||
+      !command.kp_cartesian.allFinite() || !command.kd_cartesian.allFinite())
     {
       data.leg_controller->zeroCommand();
       data.leg_controller->setEnabled(false);
       operating_mode_ = FSM_OperatingMode::ESTOP;
       break;
+    }
+  }
+  if (operating_mode_ != FSM_OperatingMode::ESTOP) {
+    if (currentState->checkPDesFoot) {safety_checker_->checkPDesFoot();}
+    if (currentState->checkForceFeedForward) {
+      safety_checker_->checkForceFeedForward();
     }
   }
   return operating_mode_;
@@ -189,6 +203,8 @@ FSM_State<T> * ControlFSM<T>::getNextState(FSM_StateName state_name) noexcept
   switch (state_name) {
     case FSM_StateName::PASSIVE: return statesList.passive.get();
     case FSM_StateName::JOINT_PD: return statesList.joint_pd.get();
+    case FSM_StateName::STAND_UP: return statesList.stand_up.get();
+    case FSM_StateName::RECOVERY_STAND: return statesList.recovery_stand.get();
     case FSM_StateName::BALANCE_STAND: return statesList.balance_stand.get();
     case FSM_StateName::LOCOMOTION: return statesList.locomotion.get();
     case FSM_StateName::INVALID: return nullptr;

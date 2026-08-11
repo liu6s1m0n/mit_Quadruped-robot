@@ -5,6 +5,7 @@
 
 #include "controller/PositionVelocityEstimator.hpp"
 
+// 用可控的假 IMU/腿传感器验证状态估计数据流、接触融合和传感器异常处理。
 namespace
 {
 

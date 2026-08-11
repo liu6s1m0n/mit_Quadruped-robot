@@ -5,6 +5,7 @@
 #include "WBC/KinWBC.hpp"
 #include "WBC/WBIC.hpp"
 
+// 用简化任务和接触矩阵分别验证 KinWBC 的任务层级与 WBIC 的动力学约束求解。
 namespace
 {
 

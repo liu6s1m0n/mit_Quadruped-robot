@@ -1,3 +1,4 @@
+// MuJoCo 适配层：负责原生 UI、模型地址映射、控制力矩写入和物理线程。
 #include "SimulationBridge.hpp"
 
 #include <algorithm>
@@ -33,9 +34,11 @@ namespace
 
 using MjuiAddFunction = void (*)(mjUI *, const mjuiDef *);
 double * g_standing_height_slider = nullptr;
+int * g_walking_toggle = nullptr;
 
 MjuiAddFunction originalMjuiAdd()
 {
+  // 取得 MuJoCo 原始函数，避免下面的同名扩展再次调用自身而递归。
   static const MjuiAddFunction function = []() {
       void * symbol = ::dlsym(RTLD_NEXT, "mjui_add");
       MjuiAddFunction result = nullptr;
@@ -48,8 +51,8 @@ MjuiAddFunction originalMjuiAdd()
 
 }  // namespace
 
-// Simulate constructs its UI inside RenderLoop, so append the project control
-// while its standard Simulation section is being built on the render thread.
+// Simulate 在 RenderLoop 内部创建 UI。这里先调用原函数建立标准 Simulation 区域，
+// 再在同一渲染线程追加高度滑块，避免跨线程调用 OpenGL UI 接口。
 extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
 {
   const MjuiAddFunction add = originalMjuiAdd();
@@ -59,7 +62,8 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
   }
   add(ui, definition);
 
-  if (g_standing_height_slider == nullptr || definition == nullptr ||
+  if (g_standing_height_slider == nullptr || g_walking_toggle == nullptr ||
+    definition == nullptr ||
     definition[0].type != mjITEM_SECTION ||
     std::strcmp(definition[0].name, "Simulation") != 0)
   {
@@ -72,6 +76,7 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
       mjITEM_SLIDERNUM, "Height (m)", 2,
       g_standing_height_slider, "0.18 0.34", 0
     },
+    {mjITEM_CHECKINT, "Walking", 2, g_walking_toggle, "", 0},
     {mjITEM_END, "", 0, nullptr, "", 0}
   };
   add(ui, height_controls);
@@ -114,6 +119,7 @@ public:
 
   void receive(std::atomic<float> & standing_height) const
   {
+    // 非阻塞地读完队列，只保留最后到达的有效高度；没有数据时立即返回物理循环。
     standing_height_ipc::Command command;
     while (true) {
       const ssize_t received = ::recv(descriptor_, &command, sizeof(command), 0);
@@ -171,6 +177,7 @@ using JointAddresses =
 
 JointAddresses findJointAddresses(const mjModel * model)
 {
+  // 不能假定 XML 中关节编号连续，因此按名字查询 qpos、qvel 和 actuator 地址。
   JointAddresses result{};
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     for (std::size_t joint = 0; joint < kJointsPerLeg; ++joint) {
@@ -199,6 +206,7 @@ float synchronizeStandingHeight(
   double & slider_height, float & previous_slider_height,
   std::atomic<float> & requested_height)
 {
+  // 滑块变化时以 GUI 为准；否则把 ROS 服务写入的原子目标同步回滑块。
   const float slider_value = std::clamp(
     static_cast<float>(slider_height),
     standing_height_ipc::kMinimumHeight,
@@ -221,14 +229,15 @@ void writeCommands(
   const RobotRunner & runner, const JointAddresses & addresses,
   const mjModel * model, mjData * data)
 {
+  // qfrc_applied 每帧都必须清零，否则上一帧力矩会继续叠加。
   mju_zero(data->qfrc_applied, model->nv);
   const auto & commands = runner.jointCommands();
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     const auto & command = commands[leg];
     for (std::size_t joint = 0; joint < kJointsPerLeg; ++joint) {
       const auto & address = addresses[leg][joint];
-      // Neutralize the MJCF position servo; the complete WBC torque, including
-      // its joint-space PD terms, is applied directly as generalized force.
+      // MJCF 自带位置伺服器在这里被置为“保持当前位置”，避免它和 WBC 重复控制。
+      // 完整命令 = WBC 前馈力矩 + 关节位置 PD + 关节速度 PD。
       data->ctrl[address.actuator] = data->qpos[address.qpos];
       if (!command.enabled) {continue;}
       const Eigen::Index index = static_cast<Eigen::Index>(joint);
@@ -244,8 +253,9 @@ void writeCommands(
 void runPhysics(
   mj::Simulate & simulation, const std::string & scene_path,
   std::atomic<float> & standing_height, double & standing_height_slider,
-  std::exception_ptr & failure)
+  int & walking_toggle, std::exception_ptr & failure)
 {
+  // 该函数运行在物理线程；渲染线程通过 simulation.mtx 与它共享 mjData。
   mjModel * model = nullptr;
   mjData * data = nullptr;
   try {
@@ -270,13 +280,16 @@ void runPhysics(
     std::size_t consecutive_failures = 0;
     double previous_simulation_time = data->time;
     float previous_slider_height = standing_height.load();
+    int previous_walking_toggle = -1;
     while (!simulation.exitrequest.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       std::unique_lock<std::recursive_mutex> lock(simulation.mtx);
+      // MuJoCo Reset 会让仿真时间回退，据此重置估计器和 FSM 内部历史。
       if (data->time + 0.5 * model->opt.timestep < previous_simulation_time) {
         runner.reset();
         controller_ready = false;
         consecutive_failures = 0;
+        previous_walking_toggle = -1;
         std::printf(
           "MuJoCo reset detected: controller reset; physical state left untouched\n");
       }
@@ -284,7 +297,18 @@ void runPhysics(
       height_receiver.receive(standing_height);
       const float commanded_height = synchronizeStandingHeight(
         standing_height_slider, previous_slider_height, standing_height);
+      const int requested_walking_toggle = walking_toggle == 0 ? 0 : 1;
+      if (requested_walking_toggle != previous_walking_toggle) {
+        runner.setControlMode(
+          requested_walking_toggle == 0 ?
+          ControlMode::BalanceStand : ControlMode::Locomotion);
+        std::printf(
+          "Robot control mode set to %s\n",
+          requested_walking_toggle == 0 ? "BalanceStand" : "Locomotion");
+        previous_walking_toggle = requested_walking_toggle;
+      }
       if (simulation.run) {
+        // 控制计算使用当前传感器状态，随后写力矩，最后推进一个物理时间步。
         runner.setStandingHeight(commanded_height);
         const bool control_valid = runner.run();
         if (control_valid) {
@@ -301,6 +325,7 @@ void runPhysics(
         writeCommands(runner, addresses, model, data);
         mj_step(model, data);
       } else {
+        // 暂停时只刷新运动学量，不推进时间，也不运行控制器。
         mj_forward(model, data);
       }
     }
@@ -345,6 +370,7 @@ int SimulationBridge::run()
   mjv_defaultPerturb(&perturbation);
   auto glfw_adapter = std::make_unique<mj::GlfwAdapter>();
   g_standing_height_slider = &standing_height_slider_;
+  g_walking_toggle = &walking_toggle_;
   auto simulation = std::make_unique<mj::Simulate>(
     std::move(glfw_adapter), &camera, &options, &perturbation, false);
   simulation->run = true;
@@ -353,9 +379,11 @@ int SimulationBridge::run()
   std::thread physics(
     runPhysics, std::ref(*simulation), std::cref(scene_path_),
     std::ref(standing_height_), std::ref(standing_height_slider_),
-    std::ref(failure));
+    std::ref(walking_toggle_), std::ref(failure));
   simulation->RenderLoop();
   physics.join();
+  g_standing_height_slider = nullptr;
+  g_walking_toggle = nullptr;
   if (failure != nullptr) {std::rethrow_exception(failure);}
   return 0;
 }

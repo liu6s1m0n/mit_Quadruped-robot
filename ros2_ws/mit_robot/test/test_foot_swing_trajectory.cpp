@@ -4,6 +4,7 @@
 
 #include "controller/FootSwingTrajectory.hpp"
 
+// 验证摆动足贝塞尔轨迹的起终点、中点抬脚高度、相位边界和非法参数处理。
 namespace
 {
 

@@ -1,6 +1,7 @@
-# Desired trunk height above the ground, in metres.
+# 请求：机身中心相对地面的目标高度，单位为米。
 float32 height
 ---
+# 响应：是否接受请求、实际采用的目标高度，以及可读的结果说明。
 bool success
 float32 target_height
 string message

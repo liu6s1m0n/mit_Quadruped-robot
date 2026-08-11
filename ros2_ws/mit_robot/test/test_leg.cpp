@@ -7,6 +7,7 @@
 
 #include "sensor/leg.hpp"
 
+// 使用真实 MuJoCo 模型验证关节名称映射，以及四条腿的位置、速度和估计力矩读取。
 namespace
 {
 

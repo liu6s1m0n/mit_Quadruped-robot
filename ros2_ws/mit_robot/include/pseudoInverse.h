@@ -1,3 +1,4 @@
+// 使用 SVD 计算广义逆；小奇异值被截断，以避免接近奇异位形时数值爆炸。
 #ifndef MYMIT_ROBOT_PSEUDO_INVERSE_H_
 #define MYMIT_ROBOT_PSEUDO_INVERSE_H_
 

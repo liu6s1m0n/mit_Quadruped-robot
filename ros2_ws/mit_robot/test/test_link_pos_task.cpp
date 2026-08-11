@@ -3,6 +3,7 @@
 #include "WBC/WBC_Ctrl/LinkPosTask.hpp"
 #include "model/robots/unitree_go1.hpp"
 
+// 验证 WBC 摆动足位置任务的世界系误差、雅可比维度和浮动基座屏蔽选项。
 namespace
 {
 

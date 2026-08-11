@@ -4,6 +4,7 @@
 
 #include "model/robots/unitree_go1.hpp"
 
+// 验证 Go1 参数能正确构建 6+12 自由度模型，并检查运动学、动力学矩阵和异常输入。
 namespace
 {
 

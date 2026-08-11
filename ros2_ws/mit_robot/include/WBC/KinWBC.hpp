@@ -1,3 +1,9 @@
+/**
+ * @file KinWBC.hpp
+ * @brief 运动学层全身控制器，按任务优先级求期望关节位置和速度。
+ *
+ * 它使用零空间投影避免低优先级任务破坏高优先级任务，不处理动力学力矩。
+ */
 #ifndef KINEMATICS_WHOLE_BODY_CONTROL
 #define KINEMATICS_WHOLE_BODY_CONTROL
 

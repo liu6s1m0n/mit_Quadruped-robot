@@ -4,6 +4,7 @@
 
 #include "controller/leg_controller.hpp"
 
+// 验证单腿正运动学/雅可比、反馈更新、无效数据拒绝以及最终关节命令计算。
 namespace
 {
 

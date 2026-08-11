@@ -3,6 +3,9 @@
  * @brief Common utilities for printing
  */
 
+// 调试输出工具：统一格式化 Eigen 向量/矩阵，并支持带颜色的终端信息。
+// 这些函数只用于观察中间量，不应放进对实时性敏感的高频控制路径。
+
 #ifndef PRINT_OUT_H
 #define PRINT_OUT_H
 

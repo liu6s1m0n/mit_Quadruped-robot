@@ -1,3 +1,4 @@
+// 旧版凸 MPC C 接口使用的基础数值类型。新手通常不需要修改本文件。
 #ifndef _common_types
 #define _common_types
 #include <stdint.h>

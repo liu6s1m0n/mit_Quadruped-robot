@@ -6,6 +6,9 @@
 // This software may be modified and distributed under the terms
 // of the MIT license.  See the LICENSE file for details.
 
+// 中文阅读提示：这是 QuadProg++ 自带的旧式向量/矩阵容器，不属于机器人控制算法。
+// 初学者只需知道 GVect/GMatr 分别保存 QP 的向量和矩阵，通常无需深入其内存管理实现。
+
 #if !defined(_ARRAY_HH)
 #define _ARRAY_HH
 

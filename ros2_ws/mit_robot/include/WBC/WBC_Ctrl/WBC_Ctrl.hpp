@@ -1,3 +1,7 @@
+/**
+ * @file WBC_Ctrl.hpp
+ * @brief WBC 高层编排器：更新模型、收集任务/接触、调用 KinWBC 和 WBIC、输出关节命令。
+ */
 #ifndef MYMIT_ROBOT_WBC_CTRL_WBC_CTRL_HPP_
 #define MYMIT_ROBOT_WBC_CTRL_WBC_CTRL_HPP_
 

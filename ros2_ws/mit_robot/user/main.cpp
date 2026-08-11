@@ -1,3 +1,4 @@
+// main 只负责创建桥接器；模型加载、线程和控制算法全部封装在 SimulationBridge 中。
 #include <cstdio>
 #include <exception>
 

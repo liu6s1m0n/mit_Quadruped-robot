@@ -1,3 +1,7 @@
+/**
+ * @file WBC.hpp
+ * @brief 全身控制求解器基类，保存质量矩阵、科氏力、重力和浮动基选择矩阵。
+ */
 #ifndef WHOLE_BODY_CONTROLLER
 #define WHOLE_BODY_CONTROLLER
 

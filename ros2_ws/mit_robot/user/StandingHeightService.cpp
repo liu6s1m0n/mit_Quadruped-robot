@@ -1,3 +1,5 @@
+// ROS 2 服务网关：校验高度请求后，通过本地 socket 转发给 MuJoCo 进程。
+// 注意：它不执行控制算法，也不直接操作机器人状态。
 #include <cerrno>
 #include <cmath>
 #include <cstdio>

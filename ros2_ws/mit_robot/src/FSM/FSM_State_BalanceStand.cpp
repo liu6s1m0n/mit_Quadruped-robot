@@ -1,3 +1,4 @@
+// 平衡站立状态：四足作为接触约束，机身位置与姿态作为高优先级任务。
 #include "FSM/FSM_State_BalanceStand.h"
 
 #include <algorithm>
@@ -29,6 +30,7 @@ void FSM_State_BalanceStand<T>::onEnter()
   this->transitionData.zero();
   this->_data->gait_scheduler->requestGait(GaitType::STAND);
 
+  // 进入状态时锁定当前水平位置和姿态，避免突然跳到世界原点。
   initial_body_position_ = this->_data->state_estimate->position_world;
   if (initial_body_position_.z() < T(0.2)) {initial_body_position_.z() = T(0.3);}
   last_height_command_ = initial_body_position_.z();
@@ -62,6 +64,14 @@ FSM_StateName FSM_State_BalanceStand<T>::checkTransition()
       this->nextStateName = FSM_StateName::JOINT_PD;
       this->transitionDuration = T(0);
       break;
+    case ControlMode::StandUp:
+      this->nextStateName = FSM_StateName::STAND_UP;
+      this->transitionDuration = T(0);
+      break;
+    case ControlMode::RecoveryStand:
+      this->nextStateName = FSM_StateName::RECOVERY_STAND;
+      this->transitionDuration = T(0);
+      break;
   }
   return this->nextStateName;
 }
@@ -86,6 +96,7 @@ void FSM_State_BalanceStand<T>::onExit()
 template<typename T>
 void FSM_State_BalanceStand<T>::BalanceStandStep()
 {
+  // 如果外部期望无效，就继续保持进入状态时记录的位姿。
   wbc_data_.pBody_des = initial_body_position_;
   wbc_data_.vBody_des.setZero();
   wbc_data_.aBody_des.setZero();
@@ -100,11 +111,13 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
     wbc_data_.aBody_des = desired.body_acceleration_world;
     wbc_data_.vBody_Ori_des = desired.body_angular_velocity;
   }
+  // 额外限制单周期下降量，防止高度滑块快速下拉造成腿部瞬时折叠。
   if (last_height_command_ - wbc_data_.pBody_des.z() > T(0.001)) {
     wbc_data_.pBody_des.z() = last_height_command_ - T(0.001);
   }
   last_height_command_ = wbc_data_.pBody_des.z();
 
+  // 静态站立时先把体重平均分配给四只脚，WBIC 会在动力学约束下修正它。
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     wbc_data_.pFoot_des[leg].setZero();
     wbc_data_.vFoot_des[leg].setZero();
@@ -118,17 +131,16 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
     *this->_data->leg_controller);
   if (!wbc_valid) {return;}
 
-  // The body/contact tasks do not uniquely determine the twelve joint angles:
-  // with all four feet constrained, KinWBC still has a posture null space.  A
-  // joint impedance target prevents that null space from drifting to the other
-  // inverse-kinematics branch while WBIC continues to supply the whole-body
-  // feed-forward torque and reaction-force solution.
+  // 机身任务和四足接触不能唯一确定 12 个关节角，KinWBC 仍存在姿态零空间。
+  // 因此根据目标高度构造对称腿姿，并用较弱关节阻抗抑制零空间漂移；
+  // WBIC 计算的全身前馈力矩和地面反力仍然保留。
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     const LegId leg_id = static_cast<LegId>(leg);
     auto & command = this->_data->leg_controller->commands[leg];
     const auto & leg_model = this->_data->quadruped->leg(leg_id);
     const Vec3<T> home = leg_model.joints.home_position;
     const T nominal_height = this->_data->quadruped->nominalBodyHeight();
+    // 简化几何关系：高度比缩放腿的竖直投影，再由 acos 求大腿角度。
     const T height_ratio = wbc_data_.pBody_des.z() / nominal_height;
     const T cosine = std::clamp(
       std::cos(home.y()) * height_ratio, T(0), T(1));

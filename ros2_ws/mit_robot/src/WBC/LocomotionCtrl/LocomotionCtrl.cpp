@@ -6,6 +6,8 @@
 
 #include "orientation_tools.h"
 
+// 四足运动 WBC 适配层：机身姿态和位置始终作为任务；每条腿根据接触状态，
+// 在“支撑接触约束”与“摆动足位置任务”之间二选一。
 template<typename T>
 LocomotionCtrlData<T>::LocomotionCtrlData() noexcept
 {
@@ -102,6 +104,7 @@ bool LocomotionCtrl<T>::prepareTasksAndContacts(const void * input)
   if (!input_data.allFinite()) {return false;}
   active_contact_state_ = input_data.contact_state;
 
+  // 外部输入使用易读的 RPY，姿态任务内部使用四元数以避免直接做欧拉角差。
   const Quat<T> quaternion = ori::rpyToQuat(input_data.pBody_RPY_des);
   const Eigen::Quaternion<T> desired_orientation(
     quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
@@ -123,11 +126,13 @@ bool LocomotionCtrl<T>::prepareTasksAndContacts(const void * input)
 
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     if (input_data.contact_state[leg] > T(0)) {
+      // 支撑腿：固定足端并跟踪上游（通常为 MPC）给出的地面反作用力。
       DVec<T> desired_force = input_data.Fr_des[leg];
       foot_contacts_[leg]->setRFDesired(desired_force);
       if (!foot_contacts_[leg]->UpdateContactSpec()) {return false;}
       this->addContact(*foot_contacts_[leg]);
     } else {
+      // 摆动腿：不施加接触力，改为跟踪足端位置、速度和加速度轨迹。
       if (!foot_tasks_[leg]->update(
           input_data.pFoot_des[leg], input_data.vFoot_des[leg],
           input_data.aFoot_des[leg]))
@@ -148,6 +153,7 @@ std::array<Vec3<T>, kNumLegs> LocomotionCtrl<T>::reactionForces() const
   if (!this->result().valid) {return forces;}
 
   Eigen::Index offset = 0;
+  // WBIC 只紧凑存储当前支撑腿的反力，这里按 contact_state 恢复为固定四腿数组。
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     if (active_contact_state_[leg] > T(0)) {
       if (offset + 3 > this->result().reaction_force.size()) {

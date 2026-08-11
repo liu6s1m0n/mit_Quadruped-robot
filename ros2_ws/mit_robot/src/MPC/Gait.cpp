@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
+// 步态时序实现：用“起始偏移 + 支撑持续段数”描述每条腿在循环中的接触状态。
 namespace mpc
 {
 
@@ -27,6 +28,8 @@ void OffsetDurationGait::advance(
   if (iterations_per_segment == 0) {
     throw std::invalid_argument("iterations per gait segment must be positive");
   }
+  // 一个 horizon 被分成若干步态段；segment_fraction_ 表示当前段内的连续进度。
+  //phase_segment_表示当前位于步态周期的第几个离散段。
   phase_segment_ = (control_iteration / iterations_per_segment) % horizon_;
   segment_fraction_ = static_cast<float>(control_iteration % iterations_per_segment) /
     static_cast<float>(iterations_per_segment);
@@ -34,23 +37,42 @@ void OffsetDurationGait::advance(
 
 float OffsetDurationGait::phaseWithin(std::size_t leg, bool contact) const noexcept
 {
-  const std::size_t duration = contact ? durations_[leg] : horizon_ - durations_[leg];
+  // 加上 horizon_ 再取模，可在循环边界处安全计算相对相位，避免无符号数下溢。
+  const std::size_t duration =
+     contact ? durations_[leg] : horizon_ - durations_[leg];
   if (duration == 0) {return contact ? 1.0F : 0.0F;}
-  const std::size_t relative = (phase_segment_ + horizon_ - offsets_[leg]) % horizon_;
-  const bool active = contact ? relative < durations_[leg] : relative >= durations_[leg];
+  //5.3 计算相对周期位置
+  const std::size_t relative =
+  (phase_segment_ + horizon_ - offsets_[leg]) % horizon_;
+  //判断当前是否处于支撑期
+  const bool active =
+  contact ? relative < durations_[leg] : relative >= durations_[leg];
+  //判断当前是否处于支撑期
   if (!active) {return 0.0F;}
-  const std::size_t elapsed = contact ? relative : relative - durations_[leg];
+  //计算已经经过的离散段数
+  const std::size_t elapsed =
+  contact ? relative : relative - durations_[leg];
   return std::min(1.0F, (static_cast<float>(elapsed) + segment_fraction_) /
     static_cast<float>(duration));
 }
 
+/*其中每个元素含义是：
+  当前不支撑：0；
+  正在支撑：0 到 1；
+  支撑阶段刚结束：接近 1。
+  注意：它不是布尔值，而是连续相位。*/
 std::array<float, kNumLegs> OffsetDurationGait::contactPhase() const noexcept
 {
   std::array<float, kNumLegs> result{};
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {result[leg] = phaseWithin(leg, true);}
   return result;
 }
-
+/*其含义是：
+  当前不摆动：0；
+  正在摆动：0 到 1；
+  摆动阶段结束：接近 1。
+  在摆腿轨迹生成中，通常会用到这个相位：
+*/
 std::array<float, kNumLegs> OffsetDurationGait::swingPhase() const noexcept
 {
   std::array<float, kNumLegs> result{};
@@ -60,6 +82,7 @@ std::array<float, kNumLegs> OffsetDurationGait::swingPhase() const noexcept
 
 const std::vector<int> & OffsetDurationGait::contactTable()
 {
+  // 表采用 [预测步][腿号] 的连续布局：1 表示支撑，0 表示摆动。
   for (std::size_t step = 0; step < horizon_; ++step) {
     const std::size_t segment = (phase_segment_ + step) % horizon_;
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {

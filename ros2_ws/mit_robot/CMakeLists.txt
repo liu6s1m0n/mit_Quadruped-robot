@@ -76,6 +76,10 @@ add_library(mymit_robot_model
   src/FSM/ControlFSM.cpp
   src/FSM/FSM_State_BalanceStand.cpp
   src/FSM/FSM_State_Locomotion.cpp
+  src/FSM/FSM_State_Passive.cpp
+  src/FSM/FSM_State_RecoveryStand.cpp
+  src/FSM/FSM_State_StandUp.cpp
+  src/FSM/SafetyChecker.cpp
   src/WBC/FloatingBaseModel.cpp
   src/WBC/KinWBC.cpp
   src/WBC/LocomotionCtrl/LocomotionCtrl.cpp

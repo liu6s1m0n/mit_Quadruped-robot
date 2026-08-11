@@ -3,6 +3,7 @@
 #include <cmath>
 #include <stdexcept>
 
+// 机身姿态任务：由当前姿态到目标姿态的最短旋转构造 3 维角加速度命令。
 template<typename T>
 BodyOriTask<T>::BodyOriTask(const FloatingBaseModel<T> & model)
 : Task<T>(3), model_(&model)
@@ -75,8 +76,9 @@ bool BodyOriTask<T>::_UpdateCommand(
   desired.normalize();
   current.normalize();
 
-  // current^-1 * desired is the shortest rotation expressed in body coordinates.
+  // current^-1 * desired 表示机身坐标系下从当前姿态转到目标姿态的旋转。
   Eigen::Quaternion<T> error = current.conjugate() * desired;
+  // q 与 -q 表示同一姿态，统一选 w >= 0 的一支可得到较短的旋转路径。
   if (error.w() < T(0)) {error.coeffs() *= T(-1);}
   error.normalize();
   const Eigen::AngleAxis<T> angle_axis(error);
@@ -97,6 +99,7 @@ bool BodyOriTask<T>::_UpdateCommand(
   this->vel_des_ = desired_velocity;
   this->acc_des_ = desired_acceleration;
   this->op_cmd_ = kp_.cwiseProduct(orientation_error) +
+    // 任务命令采用“姿态 PD + 目标前馈角加速度”。
     kd_.cwiseProduct(desired_velocity - current_angular_velocity) +
     desired_acceleration;
   return this->pos_err_.allFinite() && this->op_cmd_.allFinite();

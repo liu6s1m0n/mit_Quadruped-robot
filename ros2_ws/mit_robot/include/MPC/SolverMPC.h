@@ -1,3 +1,9 @@
+/**
+ * @file SolverMPC.h
+ * @brief 有限时域接触力优化器及其参数、结果结构。
+ *
+ * 求解变量是每个预测时刻四只脚的三维地面反力，约束包括接触开关、法向力范围和摩擦锥。
+ */
 #ifndef MYMIT_ROBOT_MPC_SOLVER_MPC_H_
 #define MYMIT_ROBOT_MPC_SOLVER_MPC_H_
 

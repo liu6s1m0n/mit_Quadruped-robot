@@ -1,3 +1,9 @@
+/**
+ * @file Gait.h
+ * @brief 用“周期偏移 + 接触持续时间”描述四条腿的离散步态。
+ *
+ * contactPhase 为支撑期进度，swingPhase 为摆动期进度，取值均为 0 到 1。
+ */
 #ifndef MYMIT_ROBOT_MPC_GAIT_H_
 #define MYMIT_ROBOT_MPC_GAIT_H_
 

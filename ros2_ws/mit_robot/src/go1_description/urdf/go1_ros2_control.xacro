@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- 为单个关节声明位置命令接口，以及控制器可读取的状态接口。 -->
   <xacro:macro name="go1_control_joint" params="name initial lower upper">
     <joint name="${name}">
       <command_interface name="position">
@@ -16,6 +17,7 @@
   </xacro:macro>
 
   <xacro:macro name="go1_ros2_control" params="headless">
+    <!-- MuJoCo 硬件插件负责加载 MJCF、推进仿真，并把关节接口接入 controller_manager。 -->
     <ros2_control name="MujocoSystem" type="system">
       <hardware>
         <plugin>mujoco_ros2_control/MujocoSystemInterface</plugin>
@@ -25,6 +27,7 @@
         <param name="headless">${headless}</param>
       </hardware>
 
+      <!-- 初始角度使用近似站立构型；上下限与 GO1 模型中的关节限制一致。 -->
       <xacro:go1_control_joint name="FR_hip_joint" initial="0.0" lower="-0.863" upper="0.863"/>
       <xacro:go1_control_joint name="FR_thigh_joint" initial="0.9" lower="-0.686" upper="4.501"/>
       <xacro:go1_control_joint name="FR_calf_joint" initial="-1.8" lower="-2.818" upper="-0.888"/>

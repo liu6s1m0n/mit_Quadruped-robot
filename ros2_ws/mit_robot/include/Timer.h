@@ -2,6 +2,8 @@
  *  @brief Timer for measuring how long things take
  */
 
+// 简单性能计时器：构造时开始计时，可读取纳秒、毫秒或秒；不参与控制周期调度。
+
 #ifndef PROJECT_TIMER_H
 #define PROJECT_TIMER_H
 

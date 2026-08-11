@@ -1,3 +1,4 @@
+// 旧目录兼容接口：单足点接触。新代码优先包含 WBC/ContactSet 下的头文件。
 #ifndef Cheetah_SINGLE_CONTACT
 #define Cheetah_SINGLE_CONTACT
 

@@ -1,3 +1,9 @@
+/**
+ * @file ConvexMPCLocomotion.h
+ * @brief 将步态相位、状态预测和凸 MPC 求解器组织成一次行走规划。
+ *
+ * 输出仍是世界坐标系下的足端反作用力和相位，不直接输出电机力矩。
+ */
 #ifndef MYMIT_ROBOT_MPC_CONVEX_MPC_LOCOMOTION_H_
 #define MYMIT_ROBOT_MPC_CONVEX_MPC_LOCOMOTION_H_
 

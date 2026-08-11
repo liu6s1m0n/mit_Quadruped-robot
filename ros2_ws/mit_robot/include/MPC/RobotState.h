@@ -1,3 +1,9 @@
+/**
+ * @file RobotState.h
+ * @brief MPC 使用的紧凑机器人状态，与完整估计器数据解耦。
+ *
+ * 位置、速度和足端位置统一使用世界坐标系，旋转矩阵明确表示 body 到 world。
+ */
 #ifndef MYMIT_ROBOT_MPC_ROBOT_STATE_H_
 #define MYMIT_ROBOT_MPC_ROBOT_STATE_H_
 

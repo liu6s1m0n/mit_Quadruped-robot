@@ -1,3 +1,9 @@
+/**
+ * @file WBIC.hpp
+ * @brief 动力学层全身控制器，通过二次规划求广义加速度修正和接触力修正。
+ *
+ * 最终关节力矩满足浮动基动力学等式，同时满足足端摩擦与法向力不等式。
+ */
 #ifndef WHOLE_BODY_IMPULSE_CONTROL_H
 #define WHOLE_BODY_IMPULSE_CONTROL_H
 

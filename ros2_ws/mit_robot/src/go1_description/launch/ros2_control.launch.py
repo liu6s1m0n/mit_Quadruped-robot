@@ -1,8 +1,7 @@
 """
-Launch the GO1 MuJoCo model with ros2_control.
+通过 ros2_control 启动 GO1 MuJoCo 模型.
 
-Run ``ros2 launch mymit_robot ros2_control.launch.py`` for the controlled
-simulation. Use ``display.launch.py`` to open only the native MuJoCo model.
+此入口用于标准 ros2_control 链路；仅查看原生模型时使用 display.launch.py。
 """
 
 import os
@@ -16,7 +15,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def launch_setup(context, *args, **kwargs):
-    """Start the unmodified Menagerie GO1 MJCF through mujoco_ros2_control."""
+    """通过 mujoco_ros2_control 加载未改动的 Menagerie GO1 MJCF."""
     package_share = FindPackageShare("mymit_robot")
     xacro_file = PathJoinSubstitution([package_share, "urdf", "go1.urdf.xacro"])
     controller_config = PathJoinSubstitution([
@@ -34,6 +33,7 @@ def launch_setup(context, *args, **kwargs):
     }
 
     return [
+        # 发布 URDF 中的 TF 树；实际物理与渲染仍由 MJCF 场景负责。
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -41,6 +41,7 @@ def launch_setup(context, *args, **kwargs):
             output="both",
         ),
         Node(
+            # ros2_control 管理器加载 MuJoCo 硬件插件并推进仿真。
             package="mujoco_ros2_control",
             executable="ros2_control_node",
             parameters=[
@@ -56,6 +57,7 @@ def launch_setup(context, *args, **kwargs):
             on_exit=Shutdown(),
         ),
         Node(
+            # 广播关节反馈，供 RViz 和其他 ROS 2 节点订阅。
             package="controller_manager",
             executable="spawner",
             arguments=[
@@ -64,6 +66,7 @@ def launch_setup(context, *args, **kwargs):
             output="both",
         ),
         Node(
+            # 位置控制器默认保持未激活，避免与工程自身 WBC 同时控制关节。
             package="controller_manager",
             executable="spawner",
             arguments=[

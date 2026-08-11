@@ -1,3 +1,4 @@
+// 本文件按“估计 -> 安全初始化 -> 期望状态 -> FSM/WBC -> 关节命令”的顺序执行。
 #include "RobotRunner.hpp"
 
 #include <algorithm>
@@ -43,6 +44,7 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
     throw std::invalid_argument("RobotRunner requires a MuJoCo model and data");
   }
 
+  // 仿真时间步是所有滤波器和轨迹推进的共同时间基准。
   PositionVelocityEstimatorParameters<float> estimator_parameters;
   estimator_parameters.nominal_time_step = static_cast<float>(model_->opt.timestep);
   estimator_parameters.maximum_time_step = std::max(
@@ -52,6 +54,7 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
     quadruped_, *imu_, leg_sensor_pointers_,
     OrientationEstimatorMode::SIMULATION_TRUTH, estimator_parameters);
 
+  // 默认进入平衡站立；真正输出命令前还会经过 0.4 秒关节初始化。
   desired_state_.mode = ControlMode::BalanceStand;
   desired_state_.body_position_world.z() = quadruped_.nominalBodyHeight();
   desired_state_.valid = true;
@@ -66,7 +69,18 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
 
 void RobotRunner::setControlMode(ControlMode mode) noexcept
 {
+  if (desired_state_.mode == mode) {return;}
+  if (state_estimate_.valid) {
+    // 切换站立/行走时从当前实测位姿重新建立参考，避免回拉到旧目标。
+    desired_state_.body_position_world.x() = state_estimate_.position_world.x();
+    desired_state_.body_position_world.y() = state_estimate_.position_world.y();
+    desired_state_.body_rpy = state_estimate_.rpy;
+  }
+  desired_state_.body_velocity_world.setZero();
+  desired_state_.body_acceleration_world.setZero();
+  desired_state_.body_angular_velocity.setZero();
   desired_state_.mode = mode;
+  walking_reference_initialized_ = false;
 }
 
 void RobotRunner::setStandingHeight(float height)
@@ -81,6 +95,7 @@ void RobotRunner::setStandingHeight(float height)
 
 void RobotRunner::reset()
 {
+  // 只清除算法内部状态。MuJoCo 已经处理了 qpos/qvel，本控制器不“扶正”机器人。
   state_estimator_->reset();
   gait_scheduler_.initialize();
   state_estimate_ = StateEstimate<float>{};
@@ -93,12 +108,14 @@ void RobotRunner::reset()
   joint_initialization_start_time_ = 0.0F;
   standing_height_command_initialized_ = false;
   desired_state_initialized_ = false;
+  walking_reference_initialized_ = false;
   control_fsm_->initialize();
   disableCommands();
 }
 
 void RobotRunner::updateStandingHeightCommand()
 {
+  // 首帧从当前实测高度起步，避免 Reset 后目标高度突跳。
   if (!standing_height_command_initialized_) {
     standing_height_command_ = std::clamp(
       state_estimate_.position_world.z(), minimumStandingHeight(),
@@ -106,11 +123,51 @@ void RobotRunner::updateStandingHeightCommand()
     standing_height_command_initialized_ = true;
   }
 
+  // 速率限制换算为“每个控制周期允许变化的最大高度”。
   const float maximum_step =
     standing_height_rate_limit_ * static_cast<float>(model_->opt.timestep);
   const float error = standing_height_target_ - standing_height_command_;
   standing_height_command_ += std::clamp(error, -maximum_step, maximum_step);
   desired_state_.body_position_world.z() = standing_height_command_;
+}
+
+void RobotRunner::updateWalkingTask()
+{
+  if (desired_state_.mode != ControlMode::Locomotion) {
+    desired_state_.body_velocity_world.setZero();
+    desired_state_.body_acceleration_world.setZero();
+    desired_state_.body_angular_velocity.setZero();
+    walking_reference_initialized_ = false;
+    return;
+  }
+
+  if (!walking_reference_initialized_) {
+    desired_state_.body_position_world.x() = state_estimate_.position_world.x();
+    desired_state_.body_position_world.y() = state_estimate_.position_world.y();
+    desired_state_.body_rpy = state_estimate_.rpy;
+    walking_reference_initialized_ = true;
+  }
+
+  // “向前”按进入行走时锁定的偏航角转换到世界坐标系。
+  const float yaw = desired_state_.body_rpy.z();
+  desired_state_.body_velocity_world <<
+    walking_forward_speed_ * std::cos(yaw),
+    walking_forward_speed_ * std::sin(yaw), 0.0F;
+  desired_state_.body_acceleration_world.setZero();
+  desired_state_.body_angular_velocity.setZero();
+  const float time_step = static_cast<float>(model_->opt.timestep);
+  desired_state_.body_position_world.head<2>() +=
+    time_step * desired_state_.body_velocity_world.head<2>();
+
+  // 仿真卡顿或控制饱和时不让位置参考无限跑远，便于重新稳定。
+  Vec2<float> position_error = desired_state_.body_position_world.head<2>() -
+    state_estimate_.position_world.head<2>();
+  if (position_error.norm() > maximum_walking_position_error_) {
+    position_error.normalize();
+    desired_state_.body_position_world.head<2>() =
+      state_estimate_.position_world.head<2>() +
+      maximum_walking_position_error_ * position_error;
+  }
 }
 
 bool RobotRunner::jointInitializationComplete() const noexcept
@@ -134,6 +191,7 @@ void RobotRunner::prepareJointInitialization()
     static_cast<float>(data_->time) - joint_initialization_start_time_;
   const float phase = std::clamp(
     elapsed / joint_initialization_duration_, 0.0F, 1.0F);
+  // 三次 smoothstep 的起止速度均为零，比线性插值更不容易产生冲击。
   const float blend = phase * phase * (3.0F - 2.0F * phase);
   const float blend_rate =
     6.0F * phase * (1.0F - phase) / joint_initialization_duration_;
@@ -190,6 +248,7 @@ void RobotRunner::disableCommands() noexcept
 
 bool RobotRunner::run()
 {
+  // 1. 推进一步态并把“预计接触概率”交给状态估计器。
   gait_scheduler_.step();
   state_estimator_->setContactProbabilities(
     gait_scheduler_.gait_data.scheduledContactProbabilities());
@@ -198,6 +257,7 @@ bool RobotRunner::run()
     return false;
   }
 
+  // 2. 将估计状态同步给腿控制器；任一腿反馈无效就关闭全部输出。
   state_estimate_ = state_estimator_->result();
   joint_states_ = state_estimator_->orientationEstimator().jointStates();
   bool feedback_valid = true;
@@ -209,24 +269,27 @@ bool RobotRunner::run()
     return false;
   }
 
+  // 3. 刚启动或 Reset 后先把关节平滑带到名义姿态，再启用全身控制。
   if (!jointInitializationComplete()) {
     prepareJointInitialization();
     return collectJointCommands();
   }
 
+  // 4. 首次进入闭环时以当前姿态为参考，防止期望值从零开始跳变。
   if (!desired_state_initialized_) {
     desired_state_.body_position_world = state_estimate_.position_world;
     desired_state_.body_rpy = state_estimate_.rpy;
     desired_state_.body_velocity_world.setZero();
     desired_state_.body_acceleration_world.setZero();
     desired_state_.body_angular_velocity.setZero();
-    desired_state_.mode = ControlMode::BalanceStand;
     desired_state_.timestamp = state_estimate_.timestamp;
     desired_state_.valid = true;
     desired_state_initialized_ = true;
   }
 
+  // 5. 更新高度目标，最后由 FSM 选择站立或行走控制器并生成命令。
   updateStandingHeightCommand();
+  updateWalkingTask();
 
   control_fsm_->runFSM();
   return collectJointCommands();

@@ -1,5 +1,7 @@
+# ros2_control 控制器配置；该链路与直接运行 mymit_robot_user 的原生 WBC 链路相互独立。
 controller_manager:
   ros__parameters:
+    # 控制器管理器更新频率，单位 Hz。
     update_rate: 500
 
 joint_state_broadcaster:
@@ -11,6 +13,7 @@ forward_position_controller:
   ros__parameters:
     type: forward_command_controller/ForwardCommandController
     interface_name: position
+    # 顺序固定为 FR、FL、RR、RL，每条腿依次为髋、腿、小腿关节。
     joints:
       - FR_hip_joint
       - FR_thigh_joint

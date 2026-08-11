@@ -1,3 +1,4 @@
+// 旧版凸 MPC 求解器的 C ABI 入口；现代 C++ 控制代码优先阅读 SolverMPC.h。
 #ifndef _convexmpc_interface
 #define _convexmpc_interface
 #define K_MAX_GAIT_SEGMENTS 36

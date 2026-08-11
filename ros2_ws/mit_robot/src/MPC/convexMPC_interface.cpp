@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+// 旧版凸 MPC 的 C 接口兼容层：把原始数组整理到全局求解数据中，供历史调用方使用。
+// 当前面向对象控制链主要使用 SolverMPC；保留本文件是为了不提前删除既有接口。
 #define K_NUM_LEGS 4
 
 #define K_NUM_LEGS 4

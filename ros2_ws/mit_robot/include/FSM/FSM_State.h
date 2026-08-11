@@ -1,3 +1,9 @@
+/**
+ * @file FSM_State.h
+ * @brief 所有控制状态的抽象基类，规定进入、运行、检查切换和退出四个阶段。
+ *
+ * 状态切换采用“先检查、再过渡”的结构，便于以后加入安全检查而不改具体算法。
+ */
 #ifndef MYMIT_ROBOT_FSM_STATE_H_
 #define MYMIT_ROBOT_FSM_STATE_H_
 
@@ -12,6 +18,8 @@ enum class FSM_StateName
   INVALID,
   PASSIVE,
   JOINT_PD,
+  STAND_UP,
+  RECOVERY_STAND,
   BALANCE_STAND,
   LOCOMOTION
 };

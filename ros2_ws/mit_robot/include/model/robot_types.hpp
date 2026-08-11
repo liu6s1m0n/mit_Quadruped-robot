@@ -77,7 +77,9 @@ enum class ControlMode : std::uint8_t
   Passive = 0,
   JointPd = 1,
   BalanceStand = 2,
-  Locomotion = 3
+  Locomotion = 3,
+  StandUp = 4,
+  RecoveryStand = 5
 };
 
 /**

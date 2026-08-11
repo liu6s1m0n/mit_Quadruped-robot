@@ -6,6 +6,8 @@
 #include <exception>
 #include <stdexcept>
 
+// WBIC（全身逆动力学控制）在任务层级结果附近做二次规划，求浮动基座加速度修正
+// 和接触力修正，再通过整机动力学方程得到 12 个关节的前馈力矩。
 template<typename T>
 WBIC<T>::WBIC(
   size_t num_qdot, const std::vector<ContactSpec<T> *> * contact_list,
@@ -59,7 +61,7 @@ template<typename T>
 bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
 {
 
-  // resize G, g0, CE, ce0, CI, ci0
+  // 优化变量 z = [6 维浮动基座加速度修正, 各接触点反力修正]。
   _SetOptimizationSize();
   _SetCost();
 
@@ -68,10 +70,11 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
   DMat<T> Npre;
 
   if (_dim_rf > 0) {
-    // Contact Setting
+    // 合并所有支撑脚的接触雅可比、期望反力和摩擦约束。
     _ContactBuilding();
 
-    // Set inequality constraints
+    //一个是足端加速度，另一个是由速度形成的向心加速度
+    // 先求满足 Jc*qddot + JcDot*qdot = 0 的接触一致加速度。
     _SetInEqualityConstraint();
     WB::_WeightedInverse(_Jc, WB::Ainv_, JcBar);
     qddot_pre = JcBar * (-_JcDotQdot);
@@ -84,7 +87,7 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
     Npre = _eye;
   }
 
-  // Task
+  // 任务列表按从高到低的优先级排列，并逐层投影到前级任务的零空间。
   Task<T> * task;
   DMat<T> Jt, JtBar, JtPre;
   DVec<T> JtDotQdot, xddot;
@@ -110,7 +113,7 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
     // pretty_print(JtBar, std::cout, "JtBar");
   }
 
-  // Set equality constraints
+  // 浮动基座没有执行器，其 6 维动力学平衡必须作为等式约束严格满足。
   _SetEqualityConstraint(qddot_pre);
 
   // printf("G:\n");
@@ -118,8 +121,7 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
   // printf("g0:\n");
   // std::cout<<g0<<std::endl;
 
-  // Optimization
-  // Timer timer;
+  // QuadProg 的约定为 CE^T z + ce0 = 0，CI^T z + ci0 >= 0。
   const double f = solve_quadprog(G, g0, CE, ce0, CI, ci0, z);
   // std::cout<<"\n wbic old time: "<<timer.getMs()<<std::endl;
   if (!std::isfinite(f)) {return false;}
@@ -129,6 +131,7 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
 
   // pretty_print(qddot_pre, std::cout, "qddot_cmd");
   for (size_t i(0); i < _dim_floating; ++i) {
+    // 把优化得到的浮动基座修正量叠加到任务层级给出的名义加速度上。
     qddot_pre[i] += z[i];
   }
   _GetSolution(qddot_pre, cmd);
@@ -171,6 +174,7 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
 template<typename T>
 bool WBIC<T>::_ValidateInputs(const WBIC_ExtraData<T> & data) const
 {
+  // 求解器对维度和非有限数值很敏感，因此在进入矩阵运算前集中拒绝异常输入。
   const Eigen::Index n = static_cast<Eigen::Index>(WB::num_qdot_);
   if (!WB::b_updatesetting_ || WB::A_.rows() != n || WB::A_.cols() != n ||
     WB::Ainv_.rows() != n || WB::Ainv_.cols() != n ||
@@ -235,6 +239,7 @@ bool WBIC<T>::_ValidateInputs(const WBIC_ExtraData<T> & data) const
 template<typename T>
 void WBIC<T>::_SetEqualityConstraint(const DVec<T> & qddot)
 {
+  // 取整机动力学的浮动基座 6 行：这部分不能由关节力矩直接补偿。
   if (_dim_rf > 0) {
     _dyn_CE.block(0, 0, _dim_eq_cstr, _dim_floating) =
       WB::A_.block(0, 0, _dim_floating, _dim_floating);
@@ -261,6 +266,7 @@ void WBIC<T>::_SetEqualityConstraint(const DVec<T> & qddot)
 template<typename T>
 void WBIC<T>::_SetInEqualityConstraint()
 {
+  // 将每只支撑脚的摩擦锥与法向力边界转换成 QuadProg 使用的不等式格式。
   _dyn_CI.block(0, _dim_floating, _dim_Uf, _dim_rf) = _Uf;
   _dyn_ci0 = _Uf_ieq_vec - _Uf * _Fr_des;
 
@@ -277,12 +283,13 @@ void WBIC<T>::_SetInEqualityConstraint()
 template<typename T>
 void WBIC<T>::_ContactBuilding()
 {
+  // 不同接触对象分别保存自己的矩阵；这里按块拼成一个统一优化问题。
   DMat<T> Uf;
   DVec<T> Uf_ieq_vec;
   // Initial
-  DMat<T> Jc;
-  DVec<T> JcDotQdot;
-  size_t dim_accumul_rf, dim_accumul_uf;
+  DMat<T> Jc;//接触雅可比
+  DVec<T> JcDotQdot;//接触点在广义速度方向上的加速度分量。
+  size_t dim_accumul_rf, dim_accumul_uf;//期望接触力,摩擦锥矩阵
   (*_contact_list)[0]->getContactJacobian(Jc);
   (*_contact_list)[0]->getJcDotQdot(JcDotQdot);
   (*_contact_list)[0]->getRFConstraintMtx(Uf);
@@ -306,21 +313,21 @@ void WBIC<T>::_ContactBuilding()
     dim_new_rf = (*_contact_list)[i]->getDim();
     dim_new_uf = (*_contact_list)[i]->getDimRFConstraint();
 
-    // Jc append
+    // 追加接触雅可比。
     _Jc.block(dim_accumul_rf, 0, dim_new_rf, WB::num_qdot_) = Jc;
 
-    // JcDotQdot append
+    // 追加雅可比变化率项。
     _JcDotQdot.segment(dim_accumul_rf, dim_new_rf) = JcDotQdot;
 
-    // Uf
+    // Uf 采用块对角形式，每只脚的摩擦约束互不串扰。
     (*_contact_list)[i]->getRFConstraintMtx(Uf);
     _Uf.block(dim_accumul_uf, dim_accumul_rf, dim_new_uf, dim_new_rf) = Uf;
 
-    // Uf inequality vector
+    // 追加不等式右端项。
     (*_contact_list)[i]->getRFConstraintVec(Uf_ieq_vec);
     _Uf_ieq_vec.segment(dim_accumul_uf, dim_new_uf) = Uf_ieq_vec;
 
-    // Fr desired
+    // 追加来自 MPC 或站立控制器的期望地面反力。
     _Fr_des.segment(dim_accumul_rf, dim_new_rf) =
       (*_contact_list)[i]->getRFDesired();
     dim_accumul_rf += dim_new_rf;
@@ -335,10 +342,11 @@ void WBIC<T>::_ContactBuilding()
 template<typename T>
 void WBIC<T>::_GetSolution(const DVec<T> & qddot, DVec<T> & cmd)
 {
+  // 由 M(q)qddot + C + G = S^T tau + Jc^T Fr 反解广义力。
   DVec<T> tot_tau;
   if (_dim_rf > 0) {
     _data->_Fr = DVec<T>(_dim_rf);
-    // get Reaction forces
+    // 优化量保存的是反力修正值，需要加回期望反力 Fr_des。
     for (size_t i(0); i < _dim_rf; ++i) {
       _data->_Fr[i] = z[i + _dim_floating] + _Fr_des[i];
     }
@@ -349,6 +357,7 @@ void WBIC<T>::_GetSolution(const DVec<T> & qddot, DVec<T> & cmd)
     tot_tau = WB::A_ * qddot + WB::cori_ + WB::grav_;
   }
   _data->_qddot = qddot;
+  // 广义力前 6 项属于不可驱动基座，只取后 12 项作为关节力矩。
   cmd = tot_tau.tail(WB::num_act_joint_);
 
   // Torque check
@@ -365,7 +374,7 @@ void WBIC<T>::_GetSolution(const DVec<T> & qddot, DVec<T> & cmd)
 template<typename T>
 void WBIC<T>::_SetCost()
 {
-  // Set Cost
+  // 对角权重分别惩罚基座加速度修正和接触力修正；权重越大越不希望该量变化。
   size_t idx_offset(0);
   for (size_t i(0); i < _dim_floating; ++i) {
     G[i + idx_offset][i + idx_offset] = _data->_W_floating[i];
@@ -384,6 +393,7 @@ void WBIC<T>::UpdateSetting(
   const DVec<T> & cori, const DVec<T> & grav,
   void * extra_setting)
 {
+  // A、C、G 必须来自同一时刻、同一个模型状态，否则逆动力学不再一致。
   const Eigen::Index n = static_cast<Eigen::Index>(WB::num_qdot_);
   if (A.rows() != n || A.cols() != n || Ainv.rows() != n ||
     Ainv.cols() != n || cori.size() != n || grav.size() != n ||
@@ -405,9 +415,9 @@ void WBIC<T>::UpdateSetting(
 template<typename T>
 void WBIC<T>::_SetOptimizationSize()
 {
-  // Dimension
+  // 接触腿数量会随步态变化，所以每个控制周期都按当前接触列表重建矩阵尺寸。
   _dim_rf = 0;
-  _dim_Uf = 0;  // Dimension of inequality constraint
+  _dim_Uf = 0;  // 摩擦与法向力不等式的总维数。
   for (size_t i(0); i < (*_contact_list).size(); ++i) {
     _dim_rf += (*_contact_list)[i]->getDim();
     _dim_Uf += (*_contact_list)[i]->getDimRFConstraint();
@@ -416,13 +426,13 @@ void WBIC<T>::_SetOptimizationSize()
   _dim_opt = _dim_floating + _dim_rf;
   _dim_eq_cstr = _dim_floating;
 
-  // Matrix Setting
+  // QuadProg 使用自己的数组类型保存目标、等式和不等式矩阵。
   G.resize(0., _dim_opt, _dim_opt);
   g0.resize(0., _dim_opt);
   CE.resize(0., _dim_opt, _dim_eq_cstr);
   ce0.resize(0., _dim_eq_cstr);
 
-  // Eigen Matrix Setting
+  // 同时保留 Eigen 矩阵，便于用块操作构造约束。
   _dyn_CE = DMat<T>::Zero(_dim_eq_cstr, _dim_opt);
   _dyn_ce0 = DVec<T>(_dim_eq_cstr);
   if (_dim_rf > 0) {

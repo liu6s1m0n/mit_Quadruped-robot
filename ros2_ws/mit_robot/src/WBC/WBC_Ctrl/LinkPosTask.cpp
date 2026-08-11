@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+// 连杆位置任务：本工程主要用它跟踪摆动足在世界坐标系中的三维轨迹。
 template<typename T>
 LinkPosTask<T>::LinkPosTask(
   const FloatingBaseModel<T> & model, std::size_t contact_point_index,
@@ -79,6 +80,7 @@ bool LinkPosTask<T>::_UpdateCommand(
   this->pos_err_ = kp_kinematic_.cwiseProduct(position_error);
   this->vel_des_ = desired_velocity;
   this->acc_des_ = desired_acceleration;
+  // 与机身位置任务相同，采用位置/速度反馈和目标加速度前馈。
   this->op_cmd_ = kp_.cwiseProduct(position_error) +
     kd_.cwiseProduct(desired_velocity - current_velocity) + desired_acceleration;
   return this->op_cmd_.allFinite();
@@ -90,6 +92,7 @@ bool LinkPosTask<T>::_UpdateTaskJacobian()
   const auto & jacobians = model_->getContactJacobians();
   if (contact_point_index_ >= jacobians.size()) {return false;}
   this->Jt_ = jacobians[contact_point_index_];
+  // 某些测试只希望关节参与足端运动，可选择屏蔽浮动基座的前 6 列。
   if (!include_floating_base_) {this->Jt_.leftCols(6).setZero();}
   return this->Jt_.rows() == 3 &&
     this->Jt_.cols() == static_cast<Eigen::Index>(model_->getNumDof()) &&

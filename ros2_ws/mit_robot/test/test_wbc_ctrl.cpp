@@ -6,6 +6,7 @@
 #include "WBC/WBC_Ctrl/WBC_Ctrl.hpp"
 #include "model/robots/unitree_go1.hpp"
 
+// 验证 WBC 通用流水线能更新模型、生成 12 维命令，并在输入无效时关闭腿部输出。
 namespace
 {
 

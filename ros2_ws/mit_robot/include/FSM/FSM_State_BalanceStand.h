@@ -1,3 +1,9 @@
+/**
+ * @file FSM_State_BalanceStand.h
+ * @brief 四足均接触地面时的平衡站立状态。
+ *
+ * 该状态把期望机身位姿和四足支撑力交给 WBC，并保留关节 PD 作为局部稳定项。
+ */
 #ifndef MYMIT_ROBOT_FSM_STATE_BALANCE_STAND_H_
 #define MYMIT_ROBOT_FSM_STATE_BALANCE_STAND_H_
 

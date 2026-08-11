@@ -2,6 +2,9 @@
  *  @brief Convert the generic quadruped parameter model into a floating-base tree.
  */
 
+// 模型工厂：把通用四足参数按“浮动基座 + 每腿三转动关节”组装成 WBC 动力学树，
+// 同时负责把状态估计和四腿反馈转换成该动力学模型要求的状态排列。
+
 #ifndef MYMIT_ROBOT_MODEL_FLOATING_BASE_MODEL_FACTORY_HPP_
 #define MYMIT_ROBOT_MODEL_FLOATING_BASE_MODEL_FACTORY_HPP_
 
@@ -67,6 +70,7 @@ FBModelState<T> makeFloatingBaseState(
   }
 
   FBModelState<T> result;
+  // 浮动基座状态顺序为四元数、世界系位置、机身系空间速度、12 维关节状态。
   result.bodyOrientation << estimate.orientation_world_from_body.w(),
     estimate.orientation_world_from_body.x(),
     estimate.orientation_world_from_body.y(),
@@ -104,6 +108,7 @@ FloatingBaseModel<T> makeFloatingBaseModel(const Quadruped<T> & quadruped)
   constexpr int kFloatingBaseBodyId = 5;
 
   for (const auto & leg : quadruped.legs()) {
+    // 每条腿依次添加髋、腿和小腿刚体，父子关系与真实运动链一致。
     const std::string prefix = detail::legName(leg.leg);
     const int hip = result.addBody(
       detail::spatialInertia(leg.hip_inertia), leg.joints.armature[0],
@@ -127,6 +132,7 @@ FloatingBaseModel<T> makeFloatingBaseModel(const Quadruped<T> & quadruped)
       spatial::createSXform(identity, calf_offset), prefix + "_calf");
 
     result.addGroundContactPoint(
+      // 足端接触点位于小腿末端，后续雅可比、MPC/WBC 都引用该注册顺序。
       calf, Vec3<T>(T(0), T(0), -leg.calf_link_length), true);
   }
 

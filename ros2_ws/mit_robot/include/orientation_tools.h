@@ -13,6 +13,9 @@
  * Note that we don't use the spatial_v2 convention for quaternions!
  */
 
+// 姿态工具的核心约定：旋转矩阵表示“坐标变换”而非图形学中的主动旋转。
+// 因此使用前务必确认矩阵是 world->body 还是 body->world；混用会导致方向完全相反。
+
 #ifndef LIBBIOMIMETICS_ORIENTATION_TOOLS_H
 #define LIBBIOMIMETICS_ORIENTATION_TOOLS_H
 

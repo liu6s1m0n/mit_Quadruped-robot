@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <utility>
 
+// WBC 通用执行框架：更新动力学模型，组织任务/接触，依次运行 KinWBC 和 WBIC，
+// 最后把关节位置、速度和前馈力矩写入腿部控制器。
 template<typename T>
 WBC_Ctrl<T>::WBC_Ctrl(FloatingBaseModel<T> model)
 : model_(std::move(model)),
@@ -70,6 +72,7 @@ bool WBC_Ctrl<T>::updateModel(
   const std::array<JointState<T>, kNumLegs> & joint_states)
 {
   try {
+    // 同一份估计状态同时用于质量矩阵、重力、科氏力和接触雅可比，保证时刻一致。
     state_ = model::makeFloatingBaseState(estimate, joint_states);
     model_.setState(state_);
     model_.contactJacobians();
@@ -108,6 +111,7 @@ bool WBC_Ctrl<T>::compute()
   wbic_data_._W_floating.setConstant(floating_base_weight_);
   wbic_data_._W_rf.setConstant(reaction_force_weight_);
 
+  // KinWBC 先产生可实现的关节运动参考，不直接考虑所需力矩大小。
   if (!kin_wbc_->findConfiguration(
       state_.q, tasks_, contacts_, result_.joint_position, result_.joint_velocity))
   {
@@ -115,6 +119,7 @@ bool WBC_Ctrl<T>::compute()
   }
   wbic_->UpdateSetting(
     mass_matrix_, mass_matrix_inverse_, coriolis_, gravity_);
+  // WBIC 再加入完整动力学和接触力约束，生成关节前馈力矩。
   if (!wbic_->makeTorque(result_.joint_torque, wbic_data_)) {return false;}
 
   result_.generalized_acceleration = wbic_data_._qddot;
@@ -129,6 +134,7 @@ bool WBC_Ctrl<T>::run(
   const void * input, const StateEstimate<T> & estimate,
   const std::array<JointState<T>, kNumLegs> & joint_states)
 {
+  // 任务和接触会随步态逐周期变化，必须清空后由派生控制器重新填写。
   ++iteration_;
   invalidate();
   tasks_.clear();
@@ -141,6 +147,7 @@ bool WBC_Ctrl<T>::run(
 template<typename T>
 void WBC_Ctrl<T>::applyResult(LegController<T> & leg_controller) const
 {
+  // 先清零并按结果有效性设置使能，避免失败时沿用上一周期命令。
   leg_controller.zeroCommand();
   leg_controller.setEnabled(result_.valid);
   if (!result_.valid) {return;}
@@ -151,6 +158,7 @@ void WBC_Ctrl<T>::applyResult(LegController<T> & leg_controller) const
     command.position_desired = result_.joint_position.segment(offset, kJointsPerLeg);
     command.velocity_desired = result_.joint_velocity.segment(offset, kJointsPerLeg);
     command.torque_feedforward = result_.joint_torque.segment(offset, kJointsPerLeg);
+    // 最终关节命令 = 前馈力矩 + 对 WBC 运动参考的关节 PD 修正。
     command.kp_joint = kp_joint_;
     command.kd_joint = kd_joint_;
   }

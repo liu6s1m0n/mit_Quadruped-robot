@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <robot name="go1" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <!--
-    ROS 2 only uses this lightweight tree for TF and ros2_control interfaces.
-    MuJoCo physics and rendering continue to come directly from unitree_go1/scene.xml.
+    ROS 2 只使用这棵轻量运动树发布 TF 并声明 ros2_control 接口；
+    MuJoCo 的物理参数和渲染模型仍直接来自 unitree_go1/scene.xml。
   -->
   <xacro:arg name="headless" default="false"/>
 
@@ -21,6 +21,7 @@
   </joint>
 
   <xacro:macro name="go1_leg" params="prefix x y side">
+    <!-- 四条腿复用同一宏；prefix 区分腿号，side 用于镜像左右髋关节偏置。 -->
     <link name="${prefix}_hip_link"/>
     <link name="${prefix}_thigh_link"/>
     <link name="${prefix}_calf_link"/>
@@ -54,7 +55,7 @@
     </joint>
   </xacro:macro>
 
-  <!-- Keep the same body order as the unmodified Menagerie MJCF. -->
+  <!-- 腿顺序与未修改的 Menagerie MJCF 保持一致，传感器和控制数组也使用该顺序。 -->
   <xacro:go1_leg prefix="FR" x="${hip_x}" y="${-hip_y}" side="-1"/>
   <xacro:go1_leg prefix="FL" x="${hip_x}" y="${hip_y}" side="1"/>
   <xacro:go1_leg prefix="RR" x="${-hip_x}" y="${-hip_y}" side="-1"/>

@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
+// 运动层 MPC 封装：根据步态生成接触表和目标轨迹，再调用 SolverMPC 计算支撑力。
 namespace mpc
 {
 
@@ -13,12 +14,15 @@ ConvexMPCLocomotion<T>::ConvexMPCLocomotion(
   std::size_t iterations_between_mpc, const SolverSettings<T> & settings)
 : control_time_step_(control_time_step),
   iterations_between_mpc_(iterations_between_mpc), solver_(quadruped, settings),
+  //构造站立步态
   stand_(settings.horizon, {0, 0, 0, 0},
     {settings.horizon, settings.horizon, settings.horizon, settings.horizon}, "stand"),
+  //构造 TROT 步态
   trot_(settings.horizon, {0, settings.horizon / 2, settings.horizon / 2, 0},
     {settings.horizon / 2, settings.horizon / 2,
       settings.horizon / 2, settings.horizon / 2}, "trot")
 {
+  // 对角小跑中 LF+RH 与 RF+LH 分成两组，相位相差半个预测时域。
   if (!std::isfinite(static_cast<double>(control_time_step_)) ||
     control_time_step_ <= T(0) || iterations_between_mpc_ == 0 || settings.horizon < 2 ||
     settings.horizon % 2 != 0)
@@ -57,6 +61,7 @@ LocomotionResult<T> ConvexMPCLocomotion<T>::run(
   if (!estimate.valid || !desired.valid) {return result;}
 
   auto & gait = activeGait();
+  // iteration_ 是高速控制周期计数，步态内部会换算成较慢的 MPC 分段相位。
   gait.advance(iteration_, iterations_between_mpc_);
   const auto contact_phase = gait.contactPhase();
   const auto swing_phase = gait.swingPhase();
@@ -66,6 +71,7 @@ LocomotionResult<T> ConvexMPCLocomotion<T>::run(
   }
 
   std::vector<DesiredState<T>> trajectory(solver_.settings().horizon, desired);
+  // 用期望速度外推未来位置和偏航角，形成 MPC 需要的整段参考轨迹。
   for (std::size_t step = 0; step < trajectory.size(); ++step) {
     const T lookahead = solver_.settings().time_step * static_cast<T>(step + 1);
     trajectory[step].body_position_world =
@@ -77,6 +83,7 @@ LocomotionResult<T> ConvexMPCLocomotion<T>::run(
   }
 
   const RobotState<T> state = RobotState<T>::fromEstimate(estimate, foot_positions_world);
+  // 每次 run 都重新求解，但只把第一步地面力交给下游 WBC 使用。
   const SolverResult<T> solution = solver_.solve(state, trajectory, gait.contactTable());
   if (!solution.valid) {++iteration_; return result;}
 

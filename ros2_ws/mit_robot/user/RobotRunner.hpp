@@ -1,3 +1,10 @@
+/**
+ * @file RobotRunner.hpp
+ * @brief 单个控制周期的总调度器，是学习本工程控制数据流的最佳入口。
+ *
+ * 每次 run() 依次完成：传感器读取与状态估计 -> 初始化保护 -> FSM ->
+ * MPC/WBC -> LegController 命令。RobotRunner 不推进物理仿真，只计算控制量。
+ */
 #ifndef MYMIT_ROBOT_USER_ROBOT_RUNNER_HPP_
 #define MYMIT_ROBOT_USER_ROBOT_RUNNER_HPP_
 
@@ -13,7 +20,7 @@
 #include "sensor/imu.hpp"
 #include "sensor/leg.hpp"
 
-/** Owns and executes the complete estimator/FSM/MPC/WBC control pipeline. */
+/** 拥有并执行完整的估计器、FSM、MPC、WBC 控制管线。 */
 class RobotRunner
 {
 public:
@@ -23,9 +30,12 @@ public:
   RobotRunner(const RobotRunner &) = delete;
   RobotRunner & operator=(const RobotRunner &) = delete;
 
+  /** 执行一个控制周期；返回 false 表示本周期命令不安全、已被关闭。 */
   bool run();
+  /** 仿真 Reset 后清空控制器内部历史，但不会改写 MuJoCo 的物理状态。 */
   void reset();
   void setControlMode(ControlMode mode) noexcept;
+  /** 设置站立目标高度，实际命令会按 standing_height_rate_limit_ 平滑跟随。 */
   void setStandingHeight(float height);
   void setDesiredState(const DesiredState<float> & desired);
 
@@ -48,6 +58,7 @@ private:
   static LegSensorPointers sensorPointers(const LegSensorOwners & sensors);
   void prepareJointInitialization();
   void updateStandingHeightCommand();
+  void updateWalkingTask();
   bool jointInitializationComplete() const noexcept;
   bool collectJointCommands();
   void disableCommands() noexcept;
@@ -72,9 +83,12 @@ private:
   float standing_height_target_ = 0.27F;
   float standing_height_command_ = 0.27F;
   float standing_height_rate_limit_ = 0.08F;
+  float walking_forward_speed_ = 0.15F;
+  float maximum_walking_position_error_ = 0.25F;
   bool joint_initialization_started_ = false;
   bool standing_height_command_initialized_ = false;
   bool desired_state_initialized_ = false;
+  bool walking_reference_initialized_ = false;
 };
 
 #endif  // MYMIT_ROBOT_USER_ROBOT_RUNNER_HPP_

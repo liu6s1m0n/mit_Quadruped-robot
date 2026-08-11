@@ -11,6 +11,9 @@ File $Id: QuadProg++.cc 232 2007-06-21 12:29:00Z digasper $
 
  */
 
+// 中文阅读提示：这是 Goldfarb-Idnani 主动集二次规划算法的第三方实现。
+// 本工程只在 WBIC 中调用入口 solve_quadprog；学习控制流程时可先把本文件视为数学求解黑盒。
+
 #include <iostream>
 #include <algorithm>
 #include <cmath>

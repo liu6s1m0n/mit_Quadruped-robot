@@ -5,6 +5,8 @@
 // This software may be modified and distributed under the terms
 // of the MIT license.  See the LICENSE file for details.
 
+// QuadProg++ 容器的索引辅助函数；与机器人算法无关，保留第三方实现便于求解器复用。
+
 #include "Array.hh"
 
 /**

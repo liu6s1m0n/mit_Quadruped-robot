@@ -1,3 +1,7 @@
+/**
+ * @file LinkPosTask.hpp
+ * @brief 指定连杆（本工程主要是足端）的三维位置跟踪任务。
+ */
 #ifndef MYMIT_ROBOT_WBC_CTRL_LINK_POS_TASK_HPP_
 #define MYMIT_ROBOT_WBC_CTRL_LINK_POS_TASK_HPP_
 

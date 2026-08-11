@@ -1,3 +1,10 @@
+/**
+ * @file ControlFSM.h
+ * @brief 控制有限状态机的总入口。
+ *
+ * 新手阅读提示：ControlFSM 不直接计算力矩，它根据 DesiredState 中的 mode
+ * 选择站立、行走、关节 PD 或被动状态，再把当前状态生成的命令写入腿控制器。
+ */
 #ifndef MYMIT_ROBOT_FSM_CONTROL_FSM_H_
 #define MYMIT_ROBOT_FSM_CONTROL_FSM_H_
 
@@ -8,6 +15,10 @@
 #include "FSM/FSM_State.h"
 #include "FSM/FSM_State_BalanceStand.h"
 #include "FSM/FSM_State_Locomotion.h"
+#include "FSM/FSM_State_Passive.h"
+#include "FSM/FSM_State_RecoveryStand.h"
+#include "FSM/FSM_State_StandUp.h"
+#include "FSM/SafetyChecker.h"
 
 enum class FSM_OperatingMode
 {
@@ -20,8 +31,10 @@ enum class FSM_OperatingMode
 template < typename T >
 struct FSM_StatesList
 {
-  std::unique_ptr < FSM_State < T >> passive;
+  std::unique_ptr < FSM_State_Passive < T >> passive;
   std::unique_ptr < FSM_State < T >> joint_pd;
+  std::unique_ptr < FSM_State_StandUp < T >> stand_up;
+  std::unique_ptr < FSM_State_RecoveryStand < T >> recovery_stand;
   std::unique_ptr < FSM_State_BalanceStand < T >> balance_stand;
   std::unique_ptr < FSM_State_Locomotion < T >> locomotion;
 };
@@ -60,6 +73,7 @@ public:
   TransitionData < T > transitionData;
 
 private:
+  std::unique_ptr < SafetyChecker < T >> safety_checker_;
   FSM_OperatingMode operating_mode_ = FSM_OperatingMode::NORMAL;
   std::size_t print_num_ = 10000;
   std::size_t print_iteration_ = 0;

@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+// 固定基座接触把浮动基座的 6 个速度全部约束为零，主要用于固定机身的测试或调试。
 namespace
 {
 constexpr std::size_t kProjectNumQdot = 18;
@@ -17,6 +18,7 @@ FixedBodyContact<T>::FixedBodyContact(std::size_t num_qdot) : ContactSpec<T>(6)
     throw std::invalid_argument("fixed-body contact requires at least six velocities");
   }
   this->Jc_ = DMat<T>::Zero(this->dim_contact_, num_qdot);
+  // 广义速度的前 6 项是基座角速度和线速度，因此对应块直接设为单位阵。
   this->Jc_.template leftCols<6>().setIdentity();
   this->JcDotQdot_ = DVec<T>::Zero(this->dim_contact_);
   this->Uf_ = DMat<T>::Zero(1, this->dim_contact_);

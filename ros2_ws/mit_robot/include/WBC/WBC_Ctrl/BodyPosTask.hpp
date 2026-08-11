@@ -1,3 +1,7 @@
+/**
+ * @file BodyPosTask.hpp
+ * @brief 机身质心位置任务，使用位置/速度 PD 加前馈加速度生成任务命令。
+ */
 #ifndef MYMIT_ROBOT_WBC_CTRL_BODY_POS_TASK_HPP_
 #define MYMIT_ROBOT_WBC_CTRL_BODY_POS_TASK_HPP_
 

@@ -9,6 +9,7 @@
 #include "model/quadruped.hpp"
 #include "model/robots/unitree_go1.hpp"
 
+// 验证小跑接触表、站立受力与摩擦约束，以及 MPC 输入异常时的安全失败行为。
 namespace
 {
 

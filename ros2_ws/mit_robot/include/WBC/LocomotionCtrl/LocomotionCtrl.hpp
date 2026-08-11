@@ -1,3 +1,9 @@
+/**
+ * @file LocomotionCtrl.hpp
+ * @brief 把机身任务、摆动足任务和支撑足接触组合成一次 WBC 求解。
+ *
+ * contact_state 大于零表示支撑腿，否则该腿被当作摆动足跟踪位置轨迹。
+ */
 #ifndef MYMIT_ROBOT_WBC_LOCOMOTION_CTRL_HPP_
 #define MYMIT_ROBOT_WBC_LOCOMOTION_CTRL_HPP_
 

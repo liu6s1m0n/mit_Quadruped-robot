@@ -1,3 +1,4 @@
+// 旧目录兼容接口：固定机身接触。新代码优先包含 WBC/ContactSet 下的同名头文件。
 #ifndef Cheetah_FIXED_BODY_CONTACT
 #define Cheetah_FIXED_BODY_CONTACT
 
