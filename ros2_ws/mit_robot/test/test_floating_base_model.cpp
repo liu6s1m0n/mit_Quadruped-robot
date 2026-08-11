@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "controller/leg_controller.hpp"
 #include "model/robots/unitree_go1.hpp"
 
 // 验证 Go1 参数能正确构建 6+12 自由度模型，并检查运动学、动力学矩阵和异常输入。
@@ -66,6 +67,42 @@ TEST(FloatingBaseModel, Go1KinematicsAndDynamicsAreFinite)
   EXPECT_TRUE(derivative.dBodyPosition.allFinite());
   EXPECT_TRUE(derivative.dBodyVelocity.allFinite());
   EXPECT_TRUE(derivative.qdd.allFinite());
+}
+
+TEST(FloatingBaseModel, AnalyticLegKinematicsMatchesDynamicsTree)
+{
+  const auto quadruped = robots::unitree_go1::makeModel<double>();
+  auto model = robots::unitree_go1::makeFloatingBaseModel<double>();
+  FBModelState<double> state;
+  state.bodyOrientation << 1.0, 0.0, 0.0, 0.0;
+  state.bodyPosition.setZero();
+  state.bodyVelocity.setZero();
+  state.q = DVec<double>::Zero(kNumJoints);
+  state.qd = DVec<double>::Zero(kNumJoints);
+
+  for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    const Eigen::Index offset = static_cast<Eigen::Index>(leg * kJointsPerLeg);
+    state.q.segment<3>(offset) <<
+      0.05 * (static_cast<double>(leg) - 1.5),
+      0.75 + 0.08 * static_cast<double>(leg),
+      -1.55 - 0.06 * static_cast<double>(leg);
+  }
+  model.setState(state);
+  model.forwardKinematics();
+
+  const auto & contacts = model.getGroundContactPositions();
+  ASSERT_EQ(contacts.size(), kNumLegs);
+  for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    const LegId leg_id = static_cast<LegId>(leg);
+    const Vec3<double> q = state.q.segment<3>(
+      static_cast<Eigen::Index>(leg * kJointsPerLeg));
+    Vec3<double> foot_from_hip;
+    computeLegJacobianAndPosition(
+      quadruped, q, static_cast<Mat3<double> *>(nullptr),
+      &foot_from_hip, leg_id);
+    const Vec3<double> expected = quadruped.hipLocation(leg_id) + foot_from_hip;
+    EXPECT_TRUE(contacts[leg].isApprox(expected, 1.0e-10));
+  }
 }
 
 TEST(FloatingBaseModel, RejectsWrongStateDimensions)

@@ -21,9 +21,13 @@ template<typename T>
 struct LocomotionResult
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  DesiredState<T> command{};
   std::array<Vec3<T>, kNumLegs> reaction_forces_world{};
   std::array<T, kNumLegs> contact_phase{};
   std::array<T, kNumLegs> swing_phase{};
+  std::array<T, kNumLegs> stance_time{};
+  std::array<T, kNumLegs> swing_time{};
+  std::array<bool, kNumLegs> contact_state{};
   bool mpc_converged = false;
   bool valid = false;
 };
@@ -41,17 +45,25 @@ public:
 
   void initialize() noexcept;
   void setGait(GaitType gait);
+  /** 设置机身沿目标偏航方向的固定前进速度，单位 m/s。 */
+  void setForwardVelocity(T velocity);
   LocomotionResult<T> run(
     const StateEstimate<T> & estimate, const DesiredState<T> & desired,
     const std::array<Vec3<T>, kNumLegs> & foot_positions_world);
 
 private:
   OffsetDurationGait & activeGait() noexcept;
+  DesiredState<T> setupCommand(
+    const StateEstimate<T> & estimate, const DesiredState<T> & desired);
 
   T control_time_step_;
   std::size_t iterations_between_mpc_;
   std::size_t iteration_ = 0;
   GaitType gait_type_ = GaitType::STAND;
+  T forward_velocity_ = T(0);
+  Vec3<T> command_position_world_ = Vec3<T>::Zero();
+  T maximum_position_error_ = T(0.25);
+  bool command_initialized_ = false;
   SolverMPC<T> solver_;
   OffsetDurationGait stand_;
   OffsetDurationGait trot_;

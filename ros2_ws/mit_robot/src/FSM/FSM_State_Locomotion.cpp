@@ -17,9 +17,10 @@ FSM_State_Locomotion<T>::FSM_State_Locomotion(
   if (control_fsm_data == nullptr || !control_fsm_data->valid()) {
     throw std::invalid_argument("locomotion state requires valid FSM data");
   }
-  // MPC 不必在 500 Hz 物理频率下每帧求解，这里约每 27 ms 更新一次。
+  // MPC 的 10 段 TROT 必须与 GaitScheduler 的 0.5 s 周期一致，因此每段为
+  // 50 ms。两套接触时序若周期不同，状态估计器会逐渐把摆动脚误当支撑脚。
   const std::size_t mpc_interval = static_cast<std::size_t>(std::max(
-      T(1), T(0.027) / control_fsm_data->control_time_step));
+      T(1), std::round(T(0.05) / control_fsm_data->control_time_step)));
   mpc_ = std::make_unique<mpc::ConvexMPCLocomotion<T>>(
     *control_fsm_data->quadruped, control_fsm_data->control_time_step,
     mpc_interval);
@@ -35,6 +36,7 @@ void FSM_State_Locomotion<T>::onEnter()
   this->nextStateName = this->stateName;
   this->transitionData.zero();
   mpc_->initialize();
+  resetSwingTrajectories();
   mpc_->setGait(GaitType::TROT);
   this->_data->gait_scheduler->requestGait(GaitType::TROT);
 }
@@ -43,6 +45,12 @@ template<typename T>
 void FSM_State_Locomotion<T>::run()
 {
   LocomotionControlStep();
+}
+
+template<typename T>
+void FSM_State_Locomotion<T>::setForwardVelocity(T velocity)
+{
+  mpc_->setForwardVelocity(velocity);
 }
 
 template<typename T>
@@ -138,6 +146,43 @@ FSM_State_Locomotion<T>::footPositionsWorld() const
 }
 
 template<typename T>
+void FSM_State_Locomotion<T>::resetSwingTrajectories() noexcept
+{
+  swing_active_.fill(false);
+  for (auto & trajectory : swing_trajectories_) {
+    trajectory.reset();
+  }
+}
+
+template<typename T>
+void FSM_State_Locomotion<T>::startSwingTrajectory(
+  std::size_t leg, const Vec3<T> & initial_position,
+  const mpc::LocomotionResult<T> & locomotion_result)
+{
+  auto & trajectory = swing_trajectories_.at(leg);
+  trajectory.reset();
+  trajectory.setInitialPosition(initial_position);
+
+  // 一只脚每个完整步态周期落地一次。用期望机身速度乘以“摆动+支撑”
+  // 得到本次步长，使脚在下一次离地前与机身平均速度一致。
+  const T gait_period = locomotion_result.swing_time[leg] +
+    locomotion_result.stance_time[leg];
+  Vec2<T> step =
+    gait_period * locomotion_result.command.body_velocity_world.template head<2>();
+  if (step.norm() > maximum_step_length_) {
+    step *= maximum_step_length_ / step.norm();
+  }
+
+  Vec3<T> landing_position = initial_position;
+  landing_position.template head<2>() += step;
+  // z 始终使用离地瞬间锁存的地面高度，不能跟随摆动中的实测足高漂移。
+  landing_position.z() = initial_position.z();
+  trajectory.setFinalPosition(landing_position);
+  trajectory.setHeight(swing_height_);
+  swing_active_[leg] = true;
+}
+
+template<typename T>
 void FSM_State_Locomotion<T>::LocomotionControlStep()
 {
   // MPC 输入必须使用统一的世界坐标系，否则反作用力方向会与 WBC 不一致。
@@ -150,20 +195,36 @@ void FSM_State_Locomotion<T>::LocomotionControlStep()
     return;
   }
 
-  const auto & desired = *this->_data->desired_state;
+  const auto & desired = result.command;
   wbc_data_.pBody_des = desired.body_position_world;
   wbc_data_.vBody_des = desired.body_velocity_world;
   wbc_data_.aBody_des = desired.body_acceleration_world;
   wbc_data_.pBody_RPY_des = desired.body_rpy;
   wbc_data_.vBody_Ori_des = desired.body_angular_velocity;
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
-    // 当前 MPC 负责接触时序和反力优化，但公开结果尚未提供独立落脚轨迹；
-    // 因此本周期继续使用当前世界系足端位置作为摆动足目标。
-    wbc_data_.pFoot_des[leg] = feet_world[leg];
-    wbc_data_.vFoot_des[leg].setZero();
-    wbc_data_.aFoot_des[leg].setZero();
     wbc_data_.Fr_des[leg] = result.reaction_forces_world[leg];
-    wbc_data_.contact_state[leg] = result.contact_phase[leg] > T(0) ? T(1) : T(0);
+    wbc_data_.contact_state[leg] = result.contact_state[leg] ? T(1) : T(0);
+
+    if (result.contact_state[leg]) {
+      // 支撑时足端位置任务不会加入 WBC；同步当前值仅用于诊断，并清除上一摆动态。
+      swing_active_[leg] = false;
+      wbc_data_.pFoot_des[leg] = feet_world[leg];
+      wbc_data_.vFoot_des[leg].setZero();
+      wbc_data_.aFoot_des[leg].setZero();
+      continue;
+    }
+
+    // 只在离地沿锁存起点和落脚点。后续周期即使实测足端受到扰动，目标轨迹
+    // 也只由锁存数据和 swing_phase 推进，不会把扰动累积成新的目标高度。
+    if (!swing_active_[leg]) {
+      startSwingTrajectory(leg, feet_world[leg], result);
+    }
+    auto & trajectory = swing_trajectories_[leg];
+    trajectory.computeSwingTrajectoryBezier(
+      result.swing_phase[leg], result.swing_time[leg]);
+    wbc_data_.pFoot_des[leg] = trajectory.getPosition();
+    wbc_data_.vFoot_des[leg] = trajectory.getVelocity();
+    wbc_data_.aFoot_des[leg] = trajectory.getAcceleration();
   }
 
   if (this->_data->use_wbc) {
@@ -188,6 +249,7 @@ template<typename T>
 void FSM_State_Locomotion<T>::onExit()
 {
   iteration_ = 0;
+  resetSwingTrajectories();
 }
 
 template class FSM_State_Locomotion<float>;

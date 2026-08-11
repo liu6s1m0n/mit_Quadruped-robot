@@ -309,8 +309,9 @@ void computeLegJacobianAndPosition(
   if (J != nullptr) {
     // 第一行：足端 x 方向速度分别对 Hip、thigh、calf 角速度的偏导。
     (*J)(0, 0) = T(0);
-    (*J)(0, 1) = l3 * c23 + l2 * c2;
-    (*J)(0, 2) = l3 * c23;
+    // MuJoCo/WBC 均采用绕 +Y 轴的右手旋转；向下连杆在正转角下朝 -x。
+    (*J)(0, 1) = -l3 * c23 - l2 * c2;
+    (*J)(0, 2) = -l3 * c23;
     // 第二行：足端 y 方向速度对三个关节角速度的偏导。
     (*J)(1, 0) = l3 * c1 * c23 + l2 * c1 * c2 - l1 * side_sign * s1;
     (*J)(1, 1) = -l3 * s1 * s23 - l2 * s1 * s2;
@@ -324,7 +325,7 @@ void computeLegJacobianAndPosition(
   // 调用方传入 p 地址时才计算足端位置；三个分量依次为 x、y、z。
   if (p != nullptr) {
     // x 主要由 thigh/calf 两个俯仰关节决定。
-    (*p)(0) = l3 * s23 + l2 * s2;
+    (*p)(0) = -l3 * s23 - l2 * s2;
     // y 同时受到 Hip 外展角和左右腿横向镜像的影响。
     (*p)(1) = l1 * side_sign * c1 + l3 * s1 * c23 + l2 * c2 * s1;
     // z 向上为正，因此正常站立时该值通常为负。

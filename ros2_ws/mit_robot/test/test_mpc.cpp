@@ -83,11 +83,43 @@ TEST(MpcLocomotion, RunsWithCurrentStateAndDesiredStateTypes)
   settings.horizon = 4;
   mpc::ConvexMPCLocomotion<double> controller(quadruped, 0.002, 15, settings);
   controller.setGait(GaitType::STAND);
+  controller.setForwardVelocity(0.3);
 
   const auto result = controller.run(
     standingEstimate(), standingDesired(), standingFeet());
   EXPECT_TRUE(result.valid);
+  EXPECT_NEAR(result.command.body_velocity_world.x(), 0.3, 1.0e-12);
+  EXPECT_NEAR(result.command.body_velocity_world.y(), 0.0, 1.0e-12);
+  EXPECT_NEAR(result.command.body_position_world.x(), 0.0006, 1.0e-12);
   for (double phase : result.contact_phase) {EXPECT_GE(phase, 0.0);}
+}
+
+TEST(MpcLocomotion, PublishesUnambiguousContactStateAndGaitTiming)
+{
+  const auto quadruped = robots::unitree_go1::makeModel<double>();
+  mpc::ConvexMPCLocomotion<double> controller(quadruped, 0.002, 15);
+  controller.setGait(GaitType::TROT);
+
+  const auto result = controller.run(
+    standingEstimate(), standingDesired(), standingFeet());
+  ASSERT_TRUE(result.valid);
+  // Trot 的第一个采样中 contact phase 恰好为零，但 FR/RL 确实处于支撑期。
+  EXPECT_DOUBLE_EQ(result.contact_phase[static_cast<std::size_t>(LegId::FR)], 0.0);
+  EXPECT_TRUE(result.contact_state[static_cast<std::size_t>(LegId::FR)]);
+  EXPECT_FALSE(result.contact_state[static_cast<std::size_t>(LegId::FL)]);
+  EXPECT_FALSE(result.contact_state[static_cast<std::size_t>(LegId::RR)]);
+  EXPECT_TRUE(result.contact_state[static_cast<std::size_t>(LegId::RL)]);
+  for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    EXPECT_NEAR(result.stance_time[leg], 0.15, 1.0e-6);
+    EXPECT_NEAR(result.swing_time[leg], 0.15, 1.0e-6);
+  }
+}
+
+TEST(MpcLocomotion, RejectsUnsafeForwardVelocity)
+{
+  const auto quadruped = robots::unitree_go1::makeModel<double>();
+  mpc::ConvexMPCLocomotion<double> controller(quadruped, 0.002);
+  EXPECT_THROW(controller.setForwardVelocity(1.01), std::invalid_argument);
 }
 
 TEST(MpcSolver, RejectsInvalidInputWithoutPublishingForces)

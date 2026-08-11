@@ -76,7 +76,7 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
       mjITEM_SLIDERNUM, "Height (m)", 2,
       g_standing_height_slider, "0.18 0.34", 0
     },
-    {mjITEM_CHECKINT, "Walking", 2, g_walking_toggle, "", 0},
+    {mjITEM_CHECKINT, "Walk 0.3 m/s", 2, g_walking_toggle, "", 0},
     {mjITEM_END, "", 0, nullptr, "", 0}
   };
   add(ui, height_controls);
@@ -273,8 +273,9 @@ void runPhysics(
 
     simulation.Load(model, data, scene_path.c_str());
     std::printf(
-      "MuJoCo GO1 control started: dt=%.4f s, default mode=BalanceStand/WBC\n",
-      model->opt.timestep);
+      "MuJoCo GO1 control started: dt=%.4f s, walking speed=%.1f m/s, "
+      "default mode=BalanceStand/WBC\n",
+      model->opt.timestep, RobotRunner::defaultWalkingForwardSpeed());
 
     bool controller_ready = false;
     std::size_t consecutive_failures = 0;

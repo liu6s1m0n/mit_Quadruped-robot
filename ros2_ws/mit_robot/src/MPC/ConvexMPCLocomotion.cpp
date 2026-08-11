@@ -35,6 +35,57 @@ template<typename T>
 void ConvexMPCLocomotion<T>::initialize() noexcept
 {
   iteration_ = 0;
+  command_initialized_ = false;
+}
+
+template<typename T>
+void ConvexMPCLocomotion<T>::setForwardVelocity(T velocity)
+{
+  constexpr T maximum_velocity = T(1);
+  if (!std::isfinite(static_cast<double>(velocity)) ||
+    std::abs(velocity) > maximum_velocity)
+  {
+    throw std::invalid_argument(
+            "locomotion forward velocity must be within [-1, 1] m/s");
+  }
+  forward_velocity_ = velocity;
+}
+
+template<typename T>
+DesiredState<T> ConvexMPCLocomotion<T>::setupCommand(
+  const StateEstimate<T> & estimate, const DesiredState<T> & desired)
+{
+  DesiredState<T> command = desired;
+  if (!command_initialized_) {
+    command_position_world_ = estimate.position_world;
+    command_position_world_.z() = desired.body_position_world.z();
+    command_initialized_ = true;
+  }
+
+  // “向前”由期望偏航角定义，再转换到 MPC 使用的世界坐标系。
+  const T yaw = desired.body_rpy.z();
+  command.body_velocity_world <<
+    forward_velocity_ * std::cos(yaw),
+    forward_velocity_ * std::sin(yaw), T(0);
+  command.body_acceleration_world.setZero();
+  command.body_angular_velocity.setZero();
+  command_position_world_.template head<2>() +=
+    control_time_step_ * command.body_velocity_world.template head<2>();
+  command_position_world_.z() = desired.body_position_world.z();
+
+  // 执行器饱和时限制位置参考与实测机身之间的距离，避免目标无限跑远。
+  Vec2<T> position_error = command_position_world_.template head<2>() -
+    estimate.position_world.template head<2>();
+  if (position_error.norm() > maximum_position_error_) {
+    position_error.normalize();
+    command_position_world_.template head<2>() =
+      estimate.position_world.template head<2>() +
+      maximum_position_error_ * position_error;
+  }
+  command.body_position_world = command_position_world_;
+  command.valid = desired.valid && command.body_position_world.allFinite() &&
+    command.body_velocity_world.allFinite();
+  return command;
 }
 
 template<typename T>
@@ -59,32 +110,47 @@ LocomotionResult<T> ConvexMPCLocomotion<T>::run(
 {
   LocomotionResult<T> result;
   if (!estimate.valid || !desired.valid) {return result;}
+  result.command = setupCommand(estimate, desired);
+  if (!result.command.valid) {return result;}
 
   auto & gait = activeGait();
   // iteration_ 是高速控制周期计数，步态内部会换算成较慢的 MPC 分段相位。
   gait.advance(iteration_, iterations_between_mpc_);
   const auto contact_phase = gait.contactPhase();
   const auto swing_phase = gait.swingPhase();
+  const auto & contact_table = gait.contactTable();
+  const T gait_segment_time =
+    control_time_step_ * static_cast<T>(iterations_between_mpc_);
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     result.contact_phase[leg] = static_cast<T>(contact_phase[leg]);
     result.swing_phase[leg] = static_cast<T>(swing_phase[leg]);
+    result.stance_time[leg] = static_cast<T>(gait.stanceTime(
+        static_cast<float>(gait_segment_time), leg));
+    result.swing_time[leg] = static_cast<T>(gait.swingTime(
+        static_cast<float>(gait_segment_time), leg));
+    // contactPhase 在支撑阶段的第一个采样恰好为零，不能用 phase > 0
+    // 判断接触；预测表第一行才是无歧义的当前接触状态。
+    result.contact_state[leg] = contact_table[leg] != 0;
   }
 
-  std::vector<DesiredState<T>> trajectory(solver_.settings().horizon, desired);
+  std::vector<DesiredState<T>> trajectory(
+    solver_.settings().horizon, result.command);
   // 用期望速度外推未来位置和偏航角，形成 MPC 需要的整段参考轨迹。
   for (std::size_t step = 0; step < trajectory.size(); ++step) {
     const T lookahead = solver_.settings().time_step * static_cast<T>(step + 1);
     trajectory[step].body_position_world =
-      desired.body_position_world + lookahead * desired.body_velocity_world;
+      result.command.body_position_world +
+      lookahead * result.command.body_velocity_world;
     trajectory[step].body_rpy.z() =
-      desired.body_rpy.z() + lookahead * desired.body_angular_velocity.z();
+      result.command.body_rpy.z() +
+      lookahead * result.command.body_angular_velocity.z();
     trajectory[step].body_angular_velocity =
-      estimate.rotation_world_from_body * desired.body_angular_velocity;
+      estimate.rotation_world_from_body * result.command.body_angular_velocity;
   }
 
   const RobotState<T> state = RobotState<T>::fromEstimate(estimate, foot_positions_world);
   // 每次 run 都重新求解，但只把第一步地面力交给下游 WBC 使用。
-  const SolverResult<T> solution = solver_.solve(state, trajectory, gait.contactTable());
+  const SolverResult<T> solution = solver_.solve(state, trajectory, contact_table);
   if (!solution.valid) {++iteration_; return result;}
 
   result.reaction_forces_world = solution.reaction_forces_world;

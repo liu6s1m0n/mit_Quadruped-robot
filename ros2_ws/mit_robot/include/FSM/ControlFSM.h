@@ -64,6 +64,8 @@ public:
   FSM_StateName currentStateName() const noexcept;
   FSM_OperatingMode operatingMode() const noexcept {return operating_mode_;}
   void setUseWbc(bool enabled) noexcept {data.use_wbc = enabled;}
+  /** 设置 Locomotion 状态使用的固定前进速度，单位 m/s。 */
+  void setLocomotionForwardVelocity(T velocity);
 
   ControlFSMData < T > data;
   FSM_StatesList < T > statesList;

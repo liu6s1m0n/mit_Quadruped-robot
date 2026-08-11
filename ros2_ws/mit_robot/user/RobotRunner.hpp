@@ -35,12 +35,15 @@ public:
   /** 仿真 Reset 后清空控制器内部历史，但不会改写 MuJoCo 的物理状态。 */
   void reset();
   void setControlMode(ControlMode mode) noexcept;
+  /** 将前进速度透传给 ControlFSM 内的 Locomotion/MPC，单位 m/s。 */
+  void setWalkingForwardSpeed(float speed);
   /** 设置站立目标高度，实际命令会按 standing_height_rate_limit_ 平滑跟随。 */
   void setStandingHeight(float height);
   void setDesiredState(const DesiredState<float> & desired);
 
   static constexpr float minimumStandingHeight() noexcept {return 0.18F;}
   static constexpr float maximumStandingHeight() noexcept {return 0.34F;}
+  static constexpr float defaultWalkingForwardSpeed() noexcept {return 0.3F;}
   float standingHeightTarget() const noexcept {return standing_height_target_;}
 
   const std::array<JointCommand<float>, kNumLegs> & jointCommands() const noexcept
@@ -58,7 +61,6 @@ private:
   static LegSensorPointers sensorPointers(const LegSensorOwners & sensors);
   void prepareJointInitialization();
   void updateStandingHeightCommand();
-  void updateWalkingTask();
   bool jointInitializationComplete() const noexcept;
   bool collectJointCommands();
   void disableCommands() noexcept;
@@ -83,12 +85,9 @@ private:
   float standing_height_target_ = 0.27F;
   float standing_height_command_ = 0.27F;
   float standing_height_rate_limit_ = 0.08F;
-  float walking_forward_speed_ = 0.15F;
-  float maximum_walking_position_error_ = 0.25F;
   bool joint_initialization_started_ = false;
   bool standing_height_command_initialized_ = false;
   bool desired_state_initialized_ = false;
-  bool walking_reference_initialized_ = false;
 };
 
 #endif  // MYMIT_ROBOT_USER_ROBOT_RUNNER_HPP_

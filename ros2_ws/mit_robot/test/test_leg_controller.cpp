@@ -37,8 +37,8 @@ TEST(LegControllerTest, ComputesGo1PositionAndJacobian)
   EXPECT_NEAR(position.x(), 0.0F, kTolerance);
   EXPECT_NEAR(position.y(), -0.08F, kTolerance);
   EXPECT_NEAR(position.z(), -0.426F, kTolerance);
-  EXPECT_NEAR(jacobian(0, 1), 0.426F, kTolerance);
-  EXPECT_NEAR(jacobian(0, 2), 0.213F, kTolerance);
+  EXPECT_NEAR(jacobian(0, 1), -0.426F, kTolerance);
+  EXPECT_NEAR(jacobian(0, 2), -0.213F, kTolerance);
   EXPECT_NEAR(jacobian(1, 0), 0.426F, kTolerance);
   EXPECT_NEAR(jacobian(2, 0), -0.08F, kTolerance);
 }

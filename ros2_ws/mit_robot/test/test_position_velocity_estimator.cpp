@@ -129,6 +129,29 @@ TEST(PositionVelocityEstimatorTest, KeepsStaticStandingRobotStable)
   EXPECT_TRUE(estimator.result().velocity_world.isZero(0.02F));
 }
 
+TEST(PositionVelocityEstimatorTest, EstimatesForwardVelocityFromFixedSupportFeet)
+{
+  SensorFixture fixture;
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::SIMULATION_TRUTH);
+  ASSERT_TRUE(estimator.run());
+
+  // 在名义姿态下，thigh 正向转动使足端沿机身 -x 运动。若足端支撑固定，
+  // 机身速度必须估计为 +x；旧公式的 x 符号相反，会得到负速度和负位置。
+  for (auto & leg : fixture.legs) {
+    leg.sample.velocity << 0.0F, 1.0F, 0.0F;
+  }
+  for (int step = 0; step < 10; ++step) {
+    fixture.advance(0.002F);
+    ASSERT_TRUE(estimator.run());
+  }
+
+  EXPECT_GT(estimator.result().velocity_world.x(), 0.1F);
+  EXPECT_GT(estimator.result().position_world.x(), 0.0F);
+  EXPECT_NEAR(estimator.result().velocity_world.y(), 0.0F, 0.02F);
+}
+
 TEST(PositionVelocityEstimatorTest, RejectsInvalidLegFrame)
 {
   SensorFixture fixture;

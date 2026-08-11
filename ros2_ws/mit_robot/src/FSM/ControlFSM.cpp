@@ -219,6 +219,12 @@ FSM_StateName ControlFSM<T>::currentStateName() const noexcept
 }
 
 template<typename T>
+void ControlFSM<T>::setLocomotionForwardVelocity(T velocity)
+{
+  statesList.locomotion->setForwardVelocity(velocity);
+}
+
+template<typename T>
 void ControlFSM<T>::printInfo(int option)
 {
   if (option == 0 && ++print_iteration_ < print_num_) {return;}
