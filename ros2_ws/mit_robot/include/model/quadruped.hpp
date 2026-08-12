@@ -16,7 +16,7 @@
 
 #include <eigen3/Eigen/Geometry>
 
-#include "cppTypes.h"
+#include "Utilities/cppTypes.h"
 #include "model/robot_types.hpp"
 
 /** 一个刚体绕质心的质量和惯量参数。 */

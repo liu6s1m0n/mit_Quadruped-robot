@@ -68,7 +68,7 @@ s.t.
 #define register      // Deprecated in C++11.
 #endif  // #if __cplusplus > 199711L
 
-#include "Array.hh"
+#include "Utilities/Array.hh"
 #include <eigen3/Eigen/Dense>
 
 using namespace GolDIdnani;

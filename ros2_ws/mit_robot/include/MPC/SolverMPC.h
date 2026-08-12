@@ -19,13 +19,18 @@ namespace mpc
 template<typename T>
 struct SolverSettings
 {
+  //参数预测时间  horizon是次数 time_step则是每一步的时间 总计算时间是相乘
+  //原来是10次 ，先改成8次
   std::size_t horizon = 10;
   T time_step = T(0.03);
+
   T friction_coefficient = T(0.4);
   T minimum_normal_force = T(0);
   T maximum_normal_force = T(120);
   T force_regularization = T(1e-5);
-  std::size_t maximum_iterations = 250;
+  //参数MPC 迭代次数，一个重要的降低运算次数
+  std::size_t maximum_iterations = 100;
+  //收敛容差 接触精度，依靠迭代法所以降低精度也可以减少计算
   T convergence_tolerance = T(1e-5);
 
   bool isValid() const noexcept;

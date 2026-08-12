@@ -7,7 +7,7 @@
 
 // QuadProg++ 容器的索引辅助函数；与机器人算法无关，保留第三方实现便于求解器复用。
 
-#include "Array.hh"
+#include "Utilities/Array.hh"
 
 /**
   Index utilities

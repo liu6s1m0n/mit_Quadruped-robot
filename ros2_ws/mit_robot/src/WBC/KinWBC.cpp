@@ -1,5 +1,5 @@
 #include "WBC/KinWBC.hpp"
-#include "pseudoInverse.h"
+#include "Utilities/pseudoInverse.h"
 
 #include <stdexcept>
 

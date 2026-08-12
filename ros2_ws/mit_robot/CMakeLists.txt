@@ -152,6 +152,12 @@ target_link_libraries(mymit_robot_user
   dl
   pthread
 )
+# libsimulate.a is distributed with GCC LTO objects. Tell GCC to use the
+# available parallelism when materializing those objects; otherwise lto-wrapper
+# falls back to serial LTRANS and emits a warning on every clean link.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_link_options(mymit_robot_user PRIVATE -flto=auto)
+endif()
 add_executable(mymit_robot_height_service
   user/StandingHeightService.cpp
 )
@@ -172,121 +178,7 @@ install(TARGETS mymit_robot_user mymit_robot_height_service
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
-
-  ament_add_gtest(test_quadruped
-    test/test_quadruped.cpp
-  )
-  target_link_libraries(test_quadruped
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_imu
-    test/test_imu.cpp
-  )
-  target_compile_definitions(test_imu PRIVATE
-    MYMIT_ROBOT_TEST_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
-  )
-  target_link_libraries(test_imu
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_leg
-    test/test_leg.cpp
-  )
-  target_compile_definitions(test_leg PRIVATE
-    MYMIT_ROBOT_TEST_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
-  )
-  target_link_libraries(test_leg
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_leg_controller
-    test/test_leg_controller.cpp
-  )
-
-  ament_add_gtest(test_contact_estimator
-    test/test_contact_estimator.cpp
-  )
-  target_compile_definitions(test_contact_estimator PRIVATE
-    MYMIT_ROBOT_TEST_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
-  )
-  target_link_libraries(test_contact_estimator
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_foot_swing_trajectory
-    test/test_foot_swing_trajectory.cpp
-  )
-  target_link_libraries(test_foot_swing_trajectory
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_gait_scheduler
-    test/test_gait_scheduler.cpp
-  )
-  target_link_libraries(test_gait_scheduler
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_orientation_estimator
-    test/test_orientation_estimator.cpp
-  )
-  target_link_libraries(test_orientation_estimator
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_position_velocity_estimator
-    test/test_position_velocity_estimator.cpp
-  )
-  target_link_libraries(test_position_velocity_estimator
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-  target_link_libraries(test_leg_controller
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_floating_base_model
-    test/test_floating_base_model.cpp
-  )
-  target_link_libraries(test_floating_base_model
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_wbc
-    test/test_link_pos_task.cpp
-    test/test_wbc.cpp
-    test/test_wbc_ctrl.cpp
-  )
-  target_link_libraries(test_wbc
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_mpc
-    test/test_mpc.cpp
-  )
-  target_link_libraries(test_mpc
-    mymit_robot_model
-    Eigen3::Eigen
-  )
-
-  ament_add_gtest(test_fsm
-    test/test_fsm.cpp
-  )
-  target_link_libraries(test_fsm
-    mymit_robot_model
-    Eigen3::Eigen
-  )
+  add_subdirectory(test)
 
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

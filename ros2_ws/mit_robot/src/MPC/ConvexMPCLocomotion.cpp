@@ -19,8 +19,8 @@ ConvexMPCLocomotion<T>::ConvexMPCLocomotion(
     {settings.horizon, settings.horizon, settings.horizon, settings.horizon}, "stand"),
   //构造 TROT 步态
   trot_(settings.horizon, {0, settings.horizon / 2, settings.horizon / 2, 0},
-    {settings.horizon / 2, settings.horizon / 2,
-      settings.horizon / 2, settings.horizon / 2}, "trot")
+    {settings.horizon * 3 / 5, settings.horizon * 3 / 5,
+      settings.horizon * 3 / 5, settings.horizon * 3 / 5}, "trot_walk")
 {
   // 对角小跑中 LF+RH 与 RF+LH 分成两组，相位相差半个预测时域。
   if (!std::isfinite(static_cast<double>(control_time_step_)) ||
@@ -36,6 +36,10 @@ void ConvexMPCLocomotion<T>::initialize() noexcept
 {
   iteration_ = 0;
   command_initialized_ = false;
+  commanded_forward_velocity_ = T(0);
+  cached_reaction_forces_world_ = {};
+  cached_solution_valid_ = false;
+  cached_solution_converged_ = false;
 }
 
 template<typename T>
@@ -56,32 +60,26 @@ DesiredState<T> ConvexMPCLocomotion<T>::setupCommand(
   const StateEstimate<T> & estimate, const DesiredState<T> & desired)
 {
   DesiredState<T> command = desired;
-  if (!command_initialized_) {
-    command_position_world_ = estimate.position_world;
-    command_position_world_.z() = desired.body_position_world.z();
-    command_initialized_ = true;
-  }
+  if (!command_initialized_) {command_initialized_ = true;}
 
   // “向前”由期望偏航角定义，再转换到 MPC 使用的世界坐标系。
+  const T maximum_velocity_step =
+    maximum_forward_acceleration_ * control_time_step_;
+  commanded_forward_velocity_ += std::clamp(
+    forward_velocity_ - commanded_forward_velocity_,
+    -maximum_velocity_step, maximum_velocity_step);
   const T yaw = desired.body_rpy.z();
   command.body_velocity_world <<
-    forward_velocity_ * std::cos(yaw),
-    forward_velocity_ * std::sin(yaw), T(0);
+    commanded_forward_velocity_ * std::cos(yaw),
+    commanded_forward_velocity_ * std::sin(yaw), T(0);
   command.body_acceleration_world.setZero();
   command.body_angular_velocity.setZero();
-  command_position_world_.template head<2>() +=
-    control_time_step_ * command.body_velocity_world.template head<2>();
-  command_position_world_.z() = desired.body_position_world.z();
-
-  // 执行器饱和时限制位置参考与实测机身之间的距离，避免目标无限跑远。
-  Vec2<T> position_error = command_position_world_.template head<2>() -
+  // 速度遥控模式不长期积分世界 x/y 目标。每周期从当前实测位置生成短时
+  // 预测轨迹，可避免打滑或跟踪误差累积成不断增大的“追赶位置”，进而让
+  // MPC 把实际速度推到命令速度两倍以上。
+  command_position_world_.template head<2>() =
     estimate.position_world.template head<2>();
-  if (position_error.norm() > maximum_position_error_) {
-    position_error.normalize();
-    command_position_world_.template head<2>() =
-      estimate.position_world.template head<2>() +
-      maximum_position_error_ * position_error;
-  }
+  command_position_world_.z() = desired.body_position_world.z();
   command.body_position_world = command_position_world_;
   command.valid = desired.valid && command.body_position_world.allFinite() &&
     command.body_velocity_world.allFinite();
@@ -94,7 +92,12 @@ void ConvexMPCLocomotion<T>::setGait(GaitType gait)
   if (gait != GaitType::STAND && gait != GaitType::TROT) {
     throw std::invalid_argument("MPC locomotion currently supports STAND and TROT");
   }
-  gait_type_ = gait;
+  if (gait_type_ != gait) {
+    gait_type_ = gait;
+    // 接触约束随步态改变，旧反力不能继续沿用。
+    cached_solution_valid_ = false;
+    cached_solution_converged_ = false;
+  }
 }
 
 template<typename T>
@@ -133,29 +136,50 @@ LocomotionResult<T> ConvexMPCLocomotion<T>::run(
     result.contact_state[leg] = contact_table[leg] != 0;
   }
 
-  std::vector<DesiredState<T>> trajectory(
-    solver_.settings().horizon, result.command);
-  // 用期望速度外推未来位置和偏航角，形成 MPC 需要的整段参考轨迹。
-  for (std::size_t step = 0; step < trajectory.size(); ++step) {
-    const T lookahead = solver_.settings().time_step * static_cast<T>(step + 1);
-    trajectory[step].body_position_world =
-      result.command.body_position_world +
-      lookahead * result.command.body_velocity_world;
-    trajectory[step].body_rpy.z() =
-      result.command.body_rpy.z() +
-      lookahead * result.command.body_angular_velocity.z();
-    trajectory[step].body_angular_velocity =
-      estimate.rotation_world_from_body * result.command.body_angular_velocity;
+  // 500 Hz 控制循环中只每 iterations_between_mpc_ 帧执行一次昂贵的优化。
+  // 其余帧仍更新命令、接触相位和摆腿轨迹，并把最近的有效反力交给 WBC。
+  const bool solve_due = !cached_solution_valid_ ||
+    iteration_ % iterations_between_mpc_ == 0;
+  if (solve_due) {
+    std::vector<DesiredState<T>> trajectory(
+      solver_.settings().horizon, result.command);
+    // 用期望速度外推未来位置和偏航角，形成 MPC 需要的整段参考轨迹。
+    for (std::size_t step = 0; step < trajectory.size(); ++step) {
+      const T lookahead = solver_.settings().time_step * static_cast<T>(step + 1);
+      trajectory[step].body_position_world =
+        result.command.body_position_world +
+        lookahead * result.command.body_velocity_world;
+      const Vec3<T> desired_rpy_rate =
+        RobotState<T>::rpyRateFromBodyAngularVelocity(
+        result.command.body_rpy, result.command.body_angular_velocity);
+      trajectory[step].body_rpy =
+        result.command.body_rpy + lookahead * desired_rpy_rate;
+      // DesiredState 明确定义为机身系角速度；SolverMPC 在构造目标向量时负责
+      // 按目标姿态转换为 RPY 导数，此处不得提前改写成世界系。
+      trajectory[step].body_angular_velocity = result.command.body_angular_velocity;
+    }
+
+    const RobotState<T> state =
+      RobotState<T>::fromEstimate(estimate, foot_positions_world);
+    const SolverResult<T> solution = solver_.solve(state, trajectory, contact_table);
+    if (solution.valid) {
+      cached_reaction_forces_world_ = solution.reaction_forces_world;
+      cached_solution_valid_ = true;
+      cached_solution_converged_ = solution.converged;
+      result.mpc_updated = true;
+    } else {
+      // 刷新点通常也是接触预测进入下一段的边界。新解失败时不能继续把
+      // 上一段接触组合的反力施加到当前支撑腿；标记无效并在下一帧重试。
+      cached_solution_valid_ = false;
+      cached_solution_converged_ = false;
+    }
   }
 
-  const RobotState<T> state = RobotState<T>::fromEstimate(estimate, foot_positions_world);
-  // 每次 run 都重新求解，但只把第一步地面力交给下游 WBC 使用。
-  const SolverResult<T> solution = solver_.solve(state, trajectory, contact_table);
-  if (!solution.valid) {++iteration_; return result;}
-
-  result.reaction_forces_world = solution.reaction_forces_world;
-  result.mpc_converged = solution.converged;
-  result.valid = true;
+  if (cached_solution_valid_) {
+    result.reaction_forces_world = cached_reaction_forces_world_;
+    result.mpc_converged = cached_solution_converged_;
+    result.valid = true;
+  }
   ++iteration_;
   return result;
 }

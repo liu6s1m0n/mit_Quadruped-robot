@@ -9,7 +9,7 @@
 #ifndef MYMIT_ROBOT_CONTROLLER_FOOT_SWING_TRAJECTORY_HPP_
 #define MYMIT_ROBOT_CONTROLLER_FOOT_SWING_TRAJECTORY_HPP_
 
-#include "cppTypes.h"
+#include "Utilities/cppTypes.h"
 
 /**
  * @brief 一只脚在摆动阶段的位置、速度和加速度轨迹。

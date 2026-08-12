@@ -72,10 +72,11 @@ void RobotRunner::setControlMode(ControlMode mode) noexcept
 {
   if (desired_state_.mode == mode) {return;}
   if (state_estimate_.valid) {
-    // 切换站立/行走时从当前实测位姿重新建立参考，避免回拉到旧目标。
+    // 切换站立/行走时只继承不可观测的水平原点和航向。roll/pitch 必须保持
+    // 水平目标；若把切换瞬间的倾斜锁存下来，WBC 会主动维持后仰姿态。
     desired_state_.body_position_world.x() = state_estimate_.position_world.x();
     desired_state_.body_position_world.y() = state_estimate_.position_world.y();
-    desired_state_.body_rpy = state_estimate_.rpy;
+    desired_state_.body_rpy << 0.0F, 0.0F, state_estimate_.rpy.z();
   }
   desired_state_.body_velocity_world.setZero();
   desired_state_.body_acceleration_world.setZero();
@@ -216,7 +217,7 @@ bool RobotRunner::run()
   // 1. 推进一步态并把“预计接触概率”交给状态估计器。
   gait_scheduler_.step();
   state_estimator_->setContactProbabilities(
-    gait_scheduler_.gait_data.scheduledContactProbabilities());
+    gait_scheduler_.gait_data.estimatorContactProbabilities());
   if (!state_estimator_->run()) {
     disableCommands();
     return false;
@@ -240,10 +241,11 @@ bool RobotRunner::run()
     return collectJointCommands();
   }
 
-  // 4. 首次进入闭环时以当前姿态为参考，防止期望值从零开始跳变。
+  // 4. 首次进入闭环时从当前水平位置和航向建立参考。初始化期间产生的
+  // roll/pitch 是需要消除的扰动，不能锁存成后续站立和行走的目标姿态。
   if (!desired_state_initialized_) {
     desired_state_.body_position_world = state_estimate_.position_world;
-    desired_state_.body_rpy = state_estimate_.rpy;
+    desired_state_.body_rpy << 0.0F, 0.0F, state_estimate_.rpy.z();
     desired_state_.body_velocity_world.setZero();
     desired_state_.body_acceleration_world.setZero();
     desired_state_.body_angular_velocity.setZero();

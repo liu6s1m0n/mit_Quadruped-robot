@@ -28,6 +28,8 @@ struct LocomotionResult
   std::array<T, kNumLegs> stance_time{};
   std::array<T, kNumLegs> swing_time{};
   std::array<bool, kNumLegs> contact_state{};
+  /** 本控制周期是否实际执行并刷新了 MPC 优化解。 */
+  bool mpc_updated = false;
   bool mpc_converged = false;
   bool valid = false;
 };
@@ -60,10 +62,20 @@ private:
   std::size_t iterations_between_mpc_;
   std::size_t iteration_ = 0;
   GaitType gait_type_ = GaitType::STAND;
+  // forward_velocity_ 是用户目标，commanded_forward_velocity_ 是经过加速度
+  // 限制后真正进入 MPC 和落脚规划的速度。
   T forward_velocity_ = T(0);
+  T commanded_forward_velocity_ = T(0);
+
+  /*高度参数重要它表示最大加速度 0.5 m/s²。-> 0.75
+  增大到 0.7～0.8 会更快达到目标速度，但切换步行时冲击也会增加。*/
+  
+  T maximum_forward_acceleration_ = T(0.75);
   Vec3<T> command_position_world_ = Vec3<T>::Zero();
-  T maximum_position_error_ = T(0.25);
   bool command_initialized_ = false;
+  std::array<Vec3<T>, kNumLegs> cached_reaction_forces_world_{};
+  bool cached_solution_valid_ = false;
+  bool cached_solution_converged_ = false;
   SolverMPC<T> solver_;
   OffsetDurationGait stand_;
   OffsetDurationGait trot_;

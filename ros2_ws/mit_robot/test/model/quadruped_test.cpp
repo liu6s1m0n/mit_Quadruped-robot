@@ -79,18 +79,28 @@ TEST(Go1QuadrupedTest, HasLeftRightMirrorSymmetry)
   EXPECT_FLOAT_EQ(model.sideSign(LegId::RL), 1.0);
 }
 
-TEST(Go1QuadrupedTest, UsesExpectedJointLimits)
+TEST(Go1QuadrupedTest, UsesExpectedJointAndActuatorParameters)
 {
   const auto model = makeQuadruped<float>(RobotType::UNITREE_GO1);
   Vec3<float> expected_lower;
   Vec3<float> expected_upper;
+  Vec3<float> expected_velocity;
+  Vec3<float> expected_torque;
   expected_lower << -0.863, -0.686, -2.818;
   expected_upper << 0.863, 4.501, -0.888;
+  expected_velocity << 30.1, 30.1, 20.06;
+  expected_torque << 23.7, 23.7, 35.55;
 
   for (const auto & leg : model.legs()) {
     SCOPED_TRACE(static_cast<unsigned int>(leg.leg));
     EXPECT_TRUE(leg.joints.lower_limit.isApprox(expected_lower, kTolerance));
     EXPECT_TRUE(leg.joints.upper_limit.isApprox(expected_upper, kTolerance));
+    EXPECT_TRUE(leg.joints.velocity_limit.isApprox(expected_velocity, kTolerance));
+    EXPECT_TRUE(leg.joints.torque_limit.isApprox(expected_torque, kTolerance));
+    EXPECT_TRUE(leg.joints.damping.isApprox(Vec3<float>(1.0, 2.0, 2.0), kTolerance));
+    EXPECT_TRUE(
+      leg.joints.friction_loss.isApprox(Vec3<float>::Constant(0.2), kTolerance));
+    EXPECT_TRUE(leg.joints.armature.isApprox(Vec3<float>::Constant(0.01), kTolerance));
     EXPECT_TRUE(
       (leg.joints.home_position.array() >=
       leg.joints.lower_limit.array()).all());

@@ -8,6 +8,7 @@
 #ifndef MYMIT_ROBOT_CONTROLLER_GAIT_SCHEDULER_HPP_
 #define MYMIT_ROBOT_CONTROLLER_GAIT_SCHEDULER_HPP_
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -134,6 +135,29 @@ struct GaitData
     for (std::size_t index = 0; index < kNumLegs; ++index) {
       probabilities[index] = contact_state_scheduled(
         static_cast<Eigen::Index>(index)) != 0 ? T(1) : T(0);
+    }
+    return probabilities;
+  }
+
+  /** 返回状态估计器使用的平滑接触可信度，降低触地/离地边界的约束权重。 */
+  std::array<T, kNumLegs> estimatorContactProbabilities() const noexcept
+  {
+    std::array<T, kNumLegs> probabilities{};
+    if (current_gait == GaitType::STAND || current_gait == GaitType::STAND_CYCLE) {
+      probabilities.fill(T(1));
+      return probabilities;
+    }
+    constexpr T transition_fraction = T(0.2);
+    for (std::size_t index = 0; index < kNumLegs; ++index) {
+      const Eigen::Index foot = static_cast<Eigen::Index>(index);
+      if (contact_state_scheduled(foot) == 0) {
+        probabilities[index] = T(0);
+        continue;
+      }
+      const T phase = std::clamp(phase_stance(foot), T(0), T(1));
+      probabilities[index] = std::clamp(
+        std::min(phase / transition_fraction,
+        (T(1) - phase) / transition_fraction), T(0), T(1));
     }
     return probabilities;
   }

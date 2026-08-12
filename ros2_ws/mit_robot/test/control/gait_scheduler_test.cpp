@@ -1,3 +1,4 @@
+#include <array>
 #include <limits>
 #include <stdexcept>
 
@@ -61,6 +62,29 @@ TEST(GaitSchedulerTest, PreservesTrotDiagonalPhasePattern)
   EXPECT_FLOAT_EQ(probabilities[static_cast<std::size_t>(LegId::FL)], 0.0F);
   EXPECT_FLOAT_EQ(probabilities[static_cast<std::size_t>(LegId::RR)], 0.0F);
   EXPECT_FLOAT_EQ(probabilities[static_cast<std::size_t>(LegId::RL)], 1.0F);
+}
+
+TEST(GaitSchedulerTest, EstimatorTrustTapersAtContactTransitions)
+{
+  GaitScheduler<float> scheduler(0.002F);
+  EXPECT_EQ(
+    scheduler.gait_data.estimatorContactProbabilities(),
+    (std::array<float, kNumLegs>{1.0F, 1.0F, 1.0F, 1.0F}));
+
+  scheduler.requestGait(GaitType::TROT);
+  scheduler.step();
+  const auto touchdown = scheduler.gait_data.estimatorContactProbabilities();
+  EXPECT_GT(touchdown[0], 0.0F);
+  EXPECT_LT(touchdown[0], 0.1F);
+  EXPECT_FLOAT_EQ(touchdown[1], 0.0F);
+  EXPECT_FLOAT_EQ(touchdown[2], 0.0F);
+  EXPECT_GT(touchdown[3], 0.0F);
+  EXPECT_LT(touchdown[3], 0.1F);
+
+  for (int step = 0; step < 62; ++step) {scheduler.step();}
+  const auto mid_stance = scheduler.gait_data.estimatorContactProbabilities();
+  EXPECT_FLOAT_EQ(mid_stance[0], 1.0F);
+  EXPECT_FLOAT_EQ(mid_stance[3], 1.0F);
 }
 
 TEST(GaitSchedulerTest, AppliesRuntimeTimingOverrideToOverrideableGait)

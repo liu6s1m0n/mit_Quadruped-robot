@@ -5,9 +5,9 @@
 #ifndef WHOLE_BODY_CONTROLLER
 #define WHOLE_BODY_CONTROLLER
 
-#include "Utilities_print.h"
-#include "pseudoInverse.h"
-#include <cppTypes.h>
+#include "Utilities/Utilities_print.h"
+#include "Utilities/pseudoInverse.h"
+#include "Utilities/cppTypes.h"
 #include <vector>
 #include <stdexcept>
 #include "ContactSpec.hpp"

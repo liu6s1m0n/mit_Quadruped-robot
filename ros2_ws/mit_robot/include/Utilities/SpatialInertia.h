@@ -13,8 +13,8 @@
 #include <iostream>
 #include <type_traits>
 
-#include "orientation_tools.h"
-#include "spatial.h"
+#include "Utilities/orientation_tools.h"
+#include "Utilities/spatial.h"
 
 using namespace ori;
 using namespace spatial;

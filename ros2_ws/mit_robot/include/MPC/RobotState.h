@@ -2,7 +2,8 @@
  * @file RobotState.h
  * @brief MPC 使用的紧凑机器人状态，与完整估计器数据解耦。
  *
- * 位置、速度和足端位置统一使用世界坐标系，旋转矩阵明确表示 body 到 world。
+ * 位置、线速度和足端位置统一使用世界坐标系，姿态速度使用 ZYX RPY 导数，
+ * 旋转矩阵明确表示 body 到 world。
  */
 #ifndef MYMIT_ROBOT_MPC_ROBOT_STATE_H_
 #define MYMIT_ROBOT_MPC_ROBOT_STATE_H_
@@ -23,7 +24,7 @@ struct RobotState
   Vec3<T> position_world = Vec3<T>::Zero();
   Vec3<T> velocity_world = Vec3<T>::Zero();
   Vec3<T> rpy = Vec3<T>::Zero();
-  Vec3<T> angular_velocity_world = Vec3<T>::Zero();
+  Vec3<T> rpy_rate = Vec3<T>::Zero();
   Mat3<T> rotation_world_from_body = Mat3<T>::Identity();
   std::array<Vec3<T>, kNumLegs> foot_position_world{};
   T timestamp = T(0);
@@ -32,6 +33,10 @@ struct RobotState
   static RobotState fromEstimate(
     const StateEstimate<T> & estimate,
     const std::array<Vec3<T>, kNumLegs> & feet_world);
+
+  /** 将机身系角速度准确映射为 ZYX 欧拉角导数。 */
+  static Vec3<T> rpyRateFromBodyAngularVelocity(
+    const Vec3<T> & rpy, const Vec3<T> & angular_velocity_body);
 
   bool isValid() const noexcept;
 };

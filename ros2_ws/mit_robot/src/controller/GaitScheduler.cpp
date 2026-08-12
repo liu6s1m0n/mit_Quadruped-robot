@@ -323,7 +323,10 @@ void GaitScheduler<T>::createGait()
         "AMBLE", T(0.5), T(0.625), all_legs,
         Vec4<T>(T(0), T(0.5), T(0.25), T(0.75)), unit_scale, true);
       break;
-
+    
+    /*参数含义是：0.5 ：完整步态周期，单位秒   0.6：支撑相占比
+      摆动时间约为 0.5 × (1 - 0.6) = 0.2 秒
+      想让腿切换更快，可以把周期调小，例如："TROT_WALK", T(0.4), T(0.6)*/
     case GaitType::TROT_WALK:
       configureGait(
         "TROT_WALK", T(0.5), T(0.6), all_legs,

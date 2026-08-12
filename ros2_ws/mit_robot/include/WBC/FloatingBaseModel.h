@@ -21,9 +21,9 @@
 #include <cmath>
 #include <cstdint>
 
-#include "orientation_tools.h"
-#include "SpatialInertia.h"
-#include "spatial.h"
+#include "Utilities/orientation_tools.h"
+#include "Utilities/SpatialInertia.h"
+#include "Utilities/spatial.h"
 
 #include <eigen3/Eigen/StdVector>
 

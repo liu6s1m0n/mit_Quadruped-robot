@@ -28,6 +28,8 @@ enum class FSM_OperatingMode
   EDAMP
 };
 
+/*每个状态只创建一次，通过 unique_ptr 管理生命周期。
+  joint_pd 类型是基类指针，是因为 JointPdState 是在 .cpp 中定义的内部类。*/
 template < typename T >
 struct FSM_StatesList
 {
@@ -39,6 +41,7 @@ struct FSM_StatesList
   std::unique_ptr < FSM_State_Locomotion < T >> locomotion;
 };
 
+/*这是最高层的状态机。*/
 /** High-level finite state machine for the modes supported by this project. */
 template < typename T >
 class ControlFSM
@@ -51,6 +54,8 @@ public:
     DesiredState < T > &desired_state, T control_time_step = T(0.001));
   ~ControlFSM() = default;
 
+  /*禁止拷贝。原因是其中包含:多个 unique_ptr；
+   大量非拥有型指针；当前状态对象。复制会造成资源和状态管理混乱。*/
   ControlFSM(const ControlFSM &) = delete;
   ControlFSM & operator = (const ControlFSM &) = delete;
 
@@ -60,18 +65,25 @@ public:
   FSM_OperatingMode safetyPostCheck();
   FSM_State < T > *getNextState(FSM_StateName state_name) noexcept;
   void printInfo(int option);
-
+  //返回当前状态名字。
   FSM_StateName currentStateName() const noexcept;
   FSM_OperatingMode operatingMode() const noexcept {return operating_mode_;}
+  //打开或关闭 WBC。
   void setUseWbc(bool enabled) noexcept {data.use_wbc = enabled;}
   /** 设置 Locomotion 状态使用的固定前进速度，单位 m/s。 */
   void setLocomotionForwardVelocity(T velocity);
-
+  
+  //所有状态共享的数据。
   ControlFSMData < T > data;
+  //所有状态对象。
   FSM_StatesList < T > statesList;
   FSM_State < T > *currentState = nullptr;
   FSM_State < T > *nextState = nullptr;
+  //下一个状态的枚举名称。
   FSM_StateName nextStateName = FSM_StateName::INVALID;
+  /*状态切换信息，包括：是否完成；
+                  切换持续时间；
+                  切换阶段状态。*/
   TransitionData < T > transitionData;
 
 private:

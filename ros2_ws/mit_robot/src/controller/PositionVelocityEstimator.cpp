@@ -184,14 +184,17 @@ void PositionVelocityEstimator<T>::initializeState(
   state_.setZero();
 
   // 水平原点无法仅靠 IMU/关节绝对确定，因此定义启动时机身 x=y=0。
-  // 机身高度由接触腿足端相对位置估计，使支撑足初始世界高度接近 0。
+  // 机身高度由接触腿足端相对位置估计，使足端碰撞球最低点接近地面。
   T weighted_height = T(0);
   T total_contact = T(0);
   for (std::size_t index = 0; index < kNumLegs; ++index) {
     const Vec3<T> foot_relative_world =
       orientation.rotation_world_from_body * foot_position_body_[index];
     const T weight = contact_probabilities_[index];
-    weighted_height += weight * (-foot_relative_world.z());
+    // 足端状态位于碰撞球球心；平地接触时球心高度为 foot_radius。
+    weighted_height += weight *
+      (quadruped_->leg(static_cast<LegId>(index)).foot_radius -
+      foot_relative_world.z());
     total_contact += weight;
   }
   if (total_contact <= std::numeric_limits<T>::epsilon()) {
@@ -261,10 +264,12 @@ bool PositionVelocityEstimator<T>::run()
     return false;
   }
 
-  // A 使用常速度离散模型；B 将补偿重力后的世界线加速度输入速度状态。
+  // A 使用常速度离散模型；B 按匀加速度模型同时更新位置和速度。
   StateMatrix transition = StateMatrix::Identity();
   transition.template block<3, 3>(0, 3) = time_step * Mat3<T>::Identity();
   InputMatrix input = InputMatrix::Zero();
+  input.template block<3, 3>(0, 0) =
+    T(0.5) * time_step * time_step * Mat3<T>::Identity();
   input.template block<3, 3>(3, 0) = time_step * Mat3<T>::Identity();
 
   // IMU 加速度计输出比力，转到世界系后还要加上世界重力才能得到线加速度。
@@ -317,12 +322,17 @@ bool PositionVelocityEstimator<T>::run()
     observation.template segment<3>(12 + vector_index) =
       (T(1) - trust) * predicted_body_velocity +
       trust * (-foot_relative_velocity_world);
-    // 支撑足世界高度观测为 0；摆动腿则使用当前预测高度，不强拉向地面。
+    // 支撑足的碰撞球球心世界高度为足半径；摆动腿不强拉向地面。
+    const T foot_contact_height =
+      quadruped_->leg(static_cast<LegId>(index)).foot_radius;
     observation(24 + static_cast<Eigen::Index>(index)) =
       (T(1) - trust) *
-      (predicted_body_position.z() + foot_relative_world.z());
+      (predicted_body_position.z() + foot_relative_world.z()) +
+      trust * foot_contact_height;
 
     process_noise.template block<3, 3>(foot_state, foot_state) *= noise_scale;
+    measurement_noise.template block<3, 3>(
+      vector_index, vector_index) *= noise_scale;
     measurement_noise.template block<3, 3>(
       12 + vector_index, 12 + vector_index) *= noise_scale;
     measurement_noise(

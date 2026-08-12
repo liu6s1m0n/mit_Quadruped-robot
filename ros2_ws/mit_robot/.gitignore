@@ -1,0 +1,5 @@
+# colcon must be run from ros2_ws. Ignore accidental in-package build products so
+# generated code is never mixed into source or scanned by ament linters again.
+/build/
+/install/
+/log/

@@ -7,7 +7,7 @@
 #ifndef WHOLE_BODY_IMPULSE_CONTROL_H
 #define WHOLE_BODY_IMPULSE_CONTROL_H
 
-#include "QuadProg++.hh"
+#include "Utilities/QuadProg++.hh"
 #include "WBC/ContactSpec.hpp"
 #include "WBC/Task.hpp"
 #include "WBC/WBC.hpp"

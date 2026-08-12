@@ -103,7 +103,8 @@ TEST(PositionVelocityEstimatorTest, InitializesStandingHeightFromLegKinematics)
   EXPECT_TRUE(estimator.result().valid);
   EXPECT_NEAR(
     estimator.result().position_world.z(),
-    fixture.quadruped.nominalBodyHeight(), 0.02F);
+    fixture.quadruped.nominalBodyHeight() +
+    fixture.quadruped.leg(LegId::FR).foot_radius, 0.02F);
   EXPECT_TRUE(estimator.result().velocity_world.isZero(1e-5F));
   EXPECT_EQ(fixture.imu.read_count, 1);
   for (const auto & leg : fixture.legs) {
@@ -190,4 +191,28 @@ TEST(PositionVelocityEstimatorTest, AcceptsAndClampsContactProbabilities)
   ASSERT_TRUE(estimator.run());
   fixture.advance(0.002F);
   EXPECT_TRUE(estimator.run());
+}
+
+TEST(PositionVelocityEstimatorTest, SwingLegMotionDoesNotBecomeBodyMotion)
+{
+  SensorFixture fixture;
+  PositionVelocityEstimator<float> estimator(
+    fixture.quadruped, fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::SIMULATION_TRUTH);
+  estimator.setContactProbabilities({1.0F, 0.0F, 1.0F, 0.0F});
+  ASSERT_TRUE(estimator.run());
+
+  // 只运动两条计划摆动腿；支撑腿与 IMU 保持静止，机身估计不应跟着摆腿漂移。
+  for (int step = 0; step < 100; ++step) {
+    const float phase = static_cast<float>(step + 1) / 100.0F;
+    fixture.legs[1].sample.position.y() += 0.002F * std::sin(phase * 3.1415926F);
+    fixture.legs[3].sample.position.y() -= 0.002F * std::sin(phase * 3.1415926F);
+    fixture.legs[1].sample.velocity.y() = 0.8F * std::cos(phase * 3.1415926F);
+    fixture.legs[3].sample.velocity.y() = -0.8F * std::cos(phase * 3.1415926F);
+    fixture.advance(0.002F);
+    ASSERT_TRUE(estimator.run());
+  }
+
+  EXPECT_LT(estimator.result().velocity_world.norm(), 0.03F);
+  EXPECT_LT(estimator.result().position_world.head<2>().norm(), 0.01F);
 }

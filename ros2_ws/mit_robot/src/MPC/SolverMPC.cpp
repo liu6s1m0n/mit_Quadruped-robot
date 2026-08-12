@@ -46,10 +46,12 @@ SolverMPC<T>::SolverMPC(
 template<typename T>
 DVec<T> SolverMPC<T>::desiredVector(const DesiredState<T> & desired) const
 {
-  // 这里的排列必须与 solve() 中的状态向量一致：姿态、位置、角速度、线速度。
+  // 这里的排列必须与 solve() 中的状态向量一致：姿态、位置、RPY 导数、线速度。
   DVec<T> result(12);
   result << desired.body_rpy, desired.body_position_world,
-    desired.body_angular_velocity, desired.body_velocity_world;
+    RobotState<T>::rpyRateFromBodyAngularVelocity(
+      desired.body_rpy, desired.body_angular_velocity),
+    desired.body_velocity_world;
   return result;
 }
 
@@ -88,7 +90,7 @@ SolverResult<T> SolverMPC<T>::solve(
   constexpr Eigen::Index state_dimension = 12;
   const Eigen::Index input_dimension = static_cast<Eigen::Index>(horizon * 12);
   // 离散状态转移采用短时间内速度恒定的线性模型。
-  // 状态顺序为 [rpy, position, angular_velocity, linear_velocity]。
+  // 状态顺序为 [rpy, position, rpy_rate, linear_velocity]。
   DMat<T> transition = DMat<T>::Identity(state_dimension, state_dimension);
   transition.block(0, 6, 3, 3) = settings_.time_step * Mat3<T>::Identity();
   transition.block(3, 9, 3, 3) = settings_.time_step * Mat3<T>::Identity();
@@ -107,7 +109,7 @@ SolverResult<T> SolverMPC<T>::solve(
 
   //构造初始状态
   DVec<T> initial(state_dimension);
-  initial << state.rpy, state.position_world, state.angular_velocity_world,
+  initial << state.rpy, state.position_world, state.rpy_rate,
     state.velocity_world;
   DVec<T> free_state = initial;
   //预测矩阵的含义
@@ -119,6 +121,19 @@ SolverResult<T> SolverMPC<T>::solve(
   DVec<T> desired_prediction(static_cast<Eigen::Index>(horizon) * state_dimension);
 
   const Vec3<T> gravity(T(0), T(0), T(-9.81));
+  const T sin_roll = std::sin(state.rpy.x());
+  const T cos_roll = std::cos(state.rpy.x());
+  const T cos_pitch = std::cos(state.rpy.y());
+  if (std::abs(cos_pitch) <= T(1e-4)) {return result;}
+  const T tan_pitch = std::tan(state.rpy.y());
+  Mat3<T> body_angular_velocity_to_rpy_rate;
+  body_angular_velocity_to_rpy_rate <<
+    T(1), sin_roll * tan_pitch, cos_roll * tan_pitch,
+    T(0), cos_roll, -sin_roll,
+    T(0), sin_roll / cos_pitch, cos_roll / cos_pitch;
+  const Mat3<T> world_angular_acceleration_to_rpy_acceleration =
+    body_angular_velocity_to_rpy_rate *
+    state.rotation_world_from_body.transpose();
   for (std::size_t step = 0; step < horizon; ++step) {
   // 逐步展开线性系统，构造预测时域内的状态响应矩阵。
   //预测无足端力状态
@@ -132,7 +147,8 @@ SolverResult<T> SolverMPC<T>::solve(
       DMat<T> input = DMat<T>::Zero(state_dimension, 3);
       const Vec3<T> lever = state.foot_position_world[leg] - state.position_world;
       input.block(6, 0, 3, 3) =
-        settings_.time_step * inertia_inverse * skew(lever);
+        settings_.time_step * world_angular_acceleration_to_rpy_acceleration *
+        inertia_inverse * skew(lever);
       input.block(9, 0, 3, 3) =
         settings_.time_step * Mat3<T>::Identity() / mass;
       //把当前输入放入完整敏感度矩阵

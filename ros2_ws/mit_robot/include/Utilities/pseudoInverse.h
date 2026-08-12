@@ -2,7 +2,7 @@
 #ifndef MYMIT_ROBOT_PSEUDO_INVERSE_H_
 #define MYMIT_ROBOT_PSEUDO_INVERSE_H_
 
-#include "cppTypes.h"
+#include "Utilities/cppTypes.h"
 #include <eigen3/Eigen/LU>
 #include <eigen3/Eigen/SVD>
 

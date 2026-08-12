@@ -20,7 +20,16 @@ public:
 
   explicit FSM_State_BalanceStand(ControlFSMData < T > * control_fsm_data);
   ~FSM_State_BalanceStand() override = default;
-
+  
+  //24～28行：FSM必须实现的接口
+  /*当前状态 checkTransition()
+        ↓
+    如果不切换，执行 run()
+    如果要切换，执行 transition()
+        ↓
+    旧状态 onExit()
+        ↓
+    新状态 onEnter()*/
   void onEnter() override;
   void run() override;
   FSM_StateName checkTransition() override;
@@ -28,10 +37,12 @@ public:
   void onExit() override;
 
 private:
+   //是每个控制周期真正执行站立控制的函数。
   void BalanceStandStep();
-
+  //会自动释放，不需要手动 delete。WBC控制器
   std::unique_ptr < LocomotionCtrl < T >> wbc_ctrl_;
   LocomotionCtrlData < T > wbc_data_;
+  //状态运行计数器
   std::size_t iteration_ = 0;
   Vec3 < T > initial_body_position_ = Vec3 < T > ::Zero();
   Vec3 < T > initial_body_rpy_ = Vec3 < T > ::Zero();

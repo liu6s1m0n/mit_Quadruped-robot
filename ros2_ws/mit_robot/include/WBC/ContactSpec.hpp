@@ -7,7 +7,7 @@
 #ifndef CONTACT_SPEC
 #define CONTACT_SPEC
 
-#include <cppTypes.h>
+#include "Utilities/cppTypes.h"
 #include <stdexcept>
 
 #define Contact ContactSpec<T>

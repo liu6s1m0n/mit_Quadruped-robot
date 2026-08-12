@@ -1,7 +1,9 @@
 /*! @file unitree_go1.hpp
  *  @brief Unitree GO1 的专属模型参数。
  *
- *  数值来自当前 unitree_go1/go1.xml。修改或重新标定 GO1 时只改本文件，
+ *  几何、聚合后的连杆惯量、关节范围、阻尼、摩擦、armature、执行器力限和
+ *  足端接触参数来自 MuJoCo Menagerie unitree_go1/go1.xml；MJCF 未声明的
+ *  关节速度上限来自 Unitree GO1 公开 URDF。修改或重新标定 GO1 时只改本文件，
  *  不影响 Quadruped 的通用接口，也不影响其他机器人参数。
  */
 

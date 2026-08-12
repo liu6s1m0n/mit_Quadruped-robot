@@ -43,7 +43,7 @@ public:
 
   static constexpr float minimumStandingHeight() noexcept {return 0.18F;}
   static constexpr float maximumStandingHeight() noexcept {return 0.34F;}
-  static constexpr float defaultWalkingForwardSpeed() noexcept {return 0.3F;}
+  static constexpr float defaultWalkingForwardSpeed() noexcept {return 0.32F;}
   float standingHeightTarget() const noexcept {return standing_height_target_;}
 
   const std::array<JointCommand<float>, kNumLegs> & jointCommands() const noexcept

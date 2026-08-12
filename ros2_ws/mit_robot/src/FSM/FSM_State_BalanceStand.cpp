@@ -18,23 +18,32 @@ FSM_State_BalanceStand<T>::FSM_State_BalanceStand(
   }
   this->turnOnAllSafetyChecks();
   this->checkPDesFoot = false;
+  //创建WBC
   wbc_ctrl_ = std::make_unique<LocomotionCtrl<T>>(
     model::makeFloatingBaseModel(*control_fsm_data->quadruped));
+  //参数1 权重越大越不修改机身加速度
   wbc_ctrl_->setFloatingBaseWeight(T(1000));
 }
 
+/*仅在第一次启动，后续不会启动*/
 template<typename T>
 void FSM_State_BalanceStand<T>::onEnter()
 {
   this->nextStateName = this->stateName;
   this->transitionData.zero();
+  //请求站立步态
   this->_data->gait_scheduler->requestGait(GaitType::STAND);
 
   // 进入状态时锁定当前水平位置和姿态，避免突然跳到世界原点。
+  //这样子就到导致了步行时刻突然切换站立直接翻到
   initial_body_position_ = this->_data->state_estimate->position_world;
+  //如果估计的机身高度低于20厘米，就认为高度估计不可靠，强行设置为30厘米。
   if (initial_body_position_.z() < T(0.2)) {initial_body_position_.z() = T(0.3);}
+  //后续高度限制以这个高度为起点
   last_height_command_ = initial_body_position_.z();
-  initial_body_rpy_ = this->_data->state_estimate->rpy;
+  // 世界航向沿用进入状态时的实测值，但站立目标始终保持机身水平。不能把
+  // 切换瞬间的 roll/pitch 锁存为目标，否则已有倾斜会被 WBC 永久维持。
+  initial_body_rpy_ << T(0), T(0), this->_data->state_estimate->rpy.z();
   body_weight_ = this->_data->quadruped->bodyInertia().mass * T(9.81);
 }
 
@@ -44,9 +53,13 @@ void FSM_State_BalanceStand<T>::run()
   BalanceStandStep();
 }
 
+//检查是否切换状态
 template<typename T>
 FSM_StateName FSM_State_BalanceStand<T>::checkTransition()
 {
+  /*每次检查状态切换时，运行计数增加1。
+    注意：它发生在 run() 之前还是之后，由 ControlFSM::runFSM() 的调用顺序决定。
+    当前控制框架中，先检查切换，如果不切换才执行当前状态的 run()。*/
   ++iteration_;
   switch (this->_data->desired_state->mode) {
     case ControlMode::BalanceStand:
@@ -54,7 +67,7 @@ FSM_StateName FSM_State_BalanceStand<T>::checkTransition()
     case ControlMode::Locomotion:
       this->nextStateName = FSM_StateName::LOCOMOTION;
       this->transitionDuration = T(0);
-      this->_data->gait_scheduler->requestGait(GaitType::TROT);
+      this->_data->gait_scheduler->requestGait(GaitType::TROT_WALK);
       break;
     case ControlMode::Passive:
       this->nextStateName = FSM_StateName::PASSIVE;
@@ -76,10 +89,15 @@ FSM_StateName FSM_State_BalanceStand<T>::checkTransition()
   return this->nextStateName;
 }
 
+/*transition：执行状态切换 在真正离开站立状态前，
+再输出一帧有效的站立控制，避免切换瞬间没有关节命令。*/
 template<typename T>
 TransitionData<T> FSM_State_BalanceStand<T>::transition()
 {
+  /*在真正离开站立状态前，再输出一帧有效的站立控制，避免切换瞬间没有关节命令。*/
   if (this->nextStateName == FSM_StateName::LOCOMOTION) {BalanceStandStep();}
+  /*进入Passive时关闭当前状态的安全检查.原因是Passive
+    本身就是一种停止主动控制的状态，继续执行普通状态的足端和力矩检查没有意义。*/
   if (this->nextStateName == FSM_StateName::PASSIVE) {
     this->turnOffAllSafetyChecks();
   }
@@ -87,12 +105,14 @@ TransitionData<T> FSM_State_BalanceStand<T>::transition()
   return this->transitionData;
 }
 
+//onExit：退出状态
 template<typename T>
 void FSM_State_BalanceStand<T>::onExit()
 {
   iteration_ = 0;
 }
-
+/*BalanceStandStep：真正的站立控制
+            这是整个文件最重要的函数。*/
 template<typename T>
 void FSM_State_BalanceStand<T>::BalanceStandStep()
 {
@@ -102,7 +122,8 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
   wbc_data_.aBody_des.setZero();
   wbc_data_.pBody_RPY_des = initial_body_rpy_;
   wbc_data_.vBody_Ori_des.setZero();
-
+  
+  //读取外部期望状态
   const DesiredState<T> & desired = *this->_data->desired_state;
   if (desired.valid) {
     wbc_data_.pBody_des = desired.body_position_world;
@@ -112,8 +133,12 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
     wbc_data_.vBody_Ori_des = desired.body_angular_velocity;
   }
   // 额外限制单周期下降量，防止高度滑块快速下拉造成腿部瞬时折叠。
+  // 参数2 高度变化率
   if (last_height_command_ - wbc_data_.pBody_des.z() > T(0.001)) {
     wbc_data_.pBody_des.z() = last_height_command_ - T(0.001);
+  }
+  if (wbc_data_.pBody_des.z() - last_height_command_ > T(0.001)) {
+      wbc_data_.pBody_des.z() = last_height_command_ + T(0.001);
   }
   last_height_command_ = wbc_data_.pBody_des.z();
 
@@ -123,28 +148,42 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
     wbc_data_.vFoot_des[leg].setZero();
     wbc_data_.aFoot_des[leg].setZero();
     wbc_data_.Fr_des[leg] = Vec3<T>(T(0), T(0), body_weight_ / T(4));
+    //标记为接触腿
     wbc_data_.contact_state[leg] = T(1);
   }
-
+  //调用WBC
+  /*&wbc_data_ 机身想去哪里；机身想保持什么姿态；四只脚是否接触；期望反力是多少。*/
+  /*&state_estimate，包括：当前机身位置；当前机身姿态；当前机身速度；当前角速度。*/
+  /*&joint_states,  12个关机的位置和速度*/
+  /*position_desired  velocity_desired ,torque_feedforward
+                                       kp_joint kd_joint */
   const bool wbc_valid = wbc_ctrl_->runAndApply(
     &wbc_data_, *this->_data->state_estimate, *this->_data->joint_states,
     *this->_data->leg_controller);
+
   if (!wbc_valid) {return;}
 
   // 机身任务和四足接触不能唯一确定 12 个关节角，KinWBC 仍存在姿态零空间。
   // 因此根据目标高度构造对称腿姿，并用较弱关节阻抗抑制零空间漂移；
   // WBIC 计算的全身前馈力矩和地面反力仍然保留。
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    //遍历四条腿
     const LegId leg_id = static_cast<LegId>(leg);
+    //该腿的最终关节命令。
     auto & command = this->_data->leg_controller->commands[leg];
+    //也就是该腿的模型参数，包括：关节上下限；home姿态；扭矩上限；连杆长度。
     const auto & leg_model = this->_data->quadruped->leg(leg_id);
+    //GO1默认home姿态大致是：髋外展角；大腿俯仰角；小腿/膝角。
     const Vec3<T> home = leg_model.joints.home_position;
+    //GO1名义机身高度当前是：
     const T nominal_height = this->_data->quadruped->nominalBodyHeight();
     // 简化几何关系：高度比缩放腿的竖直投影，再由 acos 求大腿角度。
     const T height_ratio = wbc_data_.pBody_des.z() / nominal_height;
+    //算出目标高度对应的角度，简单映射
     const T cosine = std::clamp(
       std::cos(home.y()) * height_ratio, T(0), T(1));
     const T thigh_angle = std::acos(cosine);
+    //由home下的角度已经设定
     command.position_desired << home.x(), thigh_angle, -T(2) * thigh_angle;
     command.position_desired = command.position_desired.cwiseMax(
       leg_model.joints.lower_limit).cwiseMin(leg_model.joints.upper_limit);

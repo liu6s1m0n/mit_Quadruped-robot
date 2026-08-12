@@ -17,11 +17,15 @@ public:
   explicit SimulationBridge(std::string scene_path);
   int run();
   void setStandingHeight(float height);
+  /** 设置进入 Locomotion 后使用的固定前进速度，单位 m/s。 */
+  void setWalkingForwardSpeed(float speed);
   float standingHeight() const noexcept {return standing_height_.load();}
+  float walkingForwardSpeed() const noexcept {return walking_forward_speed_;}
 
 private:
   std::string scene_path_;
   std::atomic<float> standing_height_{0.27F};
+  float walking_forward_speed_ = 0.32F;
   double standing_height_slider_ = 0.27;
   int walking_toggle_ = 0;
 };

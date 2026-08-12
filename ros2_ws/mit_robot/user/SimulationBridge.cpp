@@ -76,7 +76,7 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
       mjITEM_SLIDERNUM, "Height (m)", 2,
       g_standing_height_slider, "0.18 0.34", 0
     },
-    {mjITEM_CHECKINT, "Walk 0.3 m/s", 2, g_walking_toggle, "", 0},
+    {mjITEM_CHECKINT, "Walk", 2, g_walking_toggle, "", 0},
     {mjITEM_END, "", 0, nullptr, "", 0}
   };
   add(ui, height_controls);
@@ -253,7 +253,8 @@ void writeCommands(
 void runPhysics(
   mj::Simulate & simulation, const std::string & scene_path,
   std::atomic<float> & standing_height, double & standing_height_slider,
-  int & walking_toggle, std::exception_ptr & failure)
+  int & walking_toggle, float walking_forward_speed,
+  std::exception_ptr & failure)
 {
   // 该函数运行在物理线程；渲染线程通过 simulation.mtx 与它共享 mjData。
   mjModel * model = nullptr;
@@ -266,16 +267,25 @@ void runPhysics(
     }
     data = mj_makeData(model);
     if (data == nullptr) {throw std::runtime_error("unable to create MuJoCo data");}
+    const int home_keyframe = mj_name2id(model, mjOBJ_KEY, "home");
+    if (home_keyframe < 0) {
+      throw std::runtime_error("MuJoCo model is missing the required home keyframe");
+    }
+    // mj_makeData 使用模型默认 qpos（腿关节为零），并不是 GO1 的站立姿态。
+    // 控制器启动前先加载 home，避免机器人在关节初始化阶段从高处坠落并后仰。
+    mj_resetDataKeyframe(model, data, home_keyframe);
     mj_forward(model, data);
     const JointAddresses addresses = findJointAddresses(model);
     RobotRunner runner(model, data);
+    // 运行参数由 user/main.cpp 配置，并沿正式控制链传给 Locomotion/MPC。
+    runner.setWalkingForwardSpeed(walking_forward_speed);
     StandingHeightReceiver height_receiver;
 
     simulation.Load(model, data, scene_path.c_str());
     std::printf(
       "MuJoCo GO1 control started: dt=%.4f s, walking speed=%.1f m/s, "
       "default mode=BalanceStand/WBC\n",
-      model->opt.timestep, RobotRunner::defaultWalkingForwardSpeed());
+      model->opt.timestep, walking_forward_speed);
 
     bool controller_ready = false;
     std::size_t consecutive_failures = 0;
@@ -287,12 +297,15 @@ void runPhysics(
       std::unique_lock<std::recursive_mutex> lock(simulation.mtx);
       // MuJoCo Reset 会让仿真时间回退，据此重置估计器和 FSM 内部历史。
       if (data->time + 0.5 * model->opt.timestep < previous_simulation_time) {
+        // UI Reset 默认会回到零关节角；统一恢复为与控制器参数一致的 home 站姿。
+        mj_resetDataKeyframe(model, data, home_keyframe);
+        mj_forward(model, data);
         runner.reset();
         controller_ready = false;
         consecutive_failures = 0;
         previous_walking_toggle = -1;
         std::printf(
-          "MuJoCo reset detected: controller reset; physical state left untouched\n");
+          "MuJoCo reset detected: robot and controller restored to home posture\n");
       }
       previous_simulation_time = data->time;
       height_receiver.receive(standing_height);
@@ -357,6 +370,14 @@ void SimulationBridge::setStandingHeight(float height)
   standing_height_.store(height);
 }
 
+void SimulationBridge::setWalkingForwardSpeed(float speed)
+{
+  if (!std::isfinite(speed) || std::abs(speed) > 0.6F) {
+    throw std::invalid_argument("walking speed must be within [-0.6, 0.6] m/s");
+  }
+  walking_forward_speed_ = speed;
+}
+
 int SimulationBridge::run()
 {
   if (mjVERSION_HEADER != mj_version()) {
@@ -380,7 +401,7 @@ int SimulationBridge::run()
   std::thread physics(
     runPhysics, std::ref(*simulation), std::cref(scene_path_),
     std::ref(standing_height_), std::ref(standing_height_slider_),
-    std::ref(walking_toggle_), std::ref(failure));
+    std::ref(walking_toggle_), walking_forward_speed_, std::ref(failure));
   simulation->RenderLoop();
   physics.join();
   g_standing_height_slider = nullptr;

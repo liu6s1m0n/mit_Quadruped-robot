@@ -27,6 +27,7 @@ struct ControlFSMData
   LegController < T > *leg_controller = nullptr;
   GaitScheduler < T > *gait_scheduler = nullptr;
   DesiredState < T > *desired_state = nullptr;
+  //参数 控制周期
   T control_time_step = T(0.001);
   bool use_wbc = true;
 

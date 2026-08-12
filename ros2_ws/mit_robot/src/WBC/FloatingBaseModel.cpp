@@ -19,8 +19,8 @@
 #include <vector>
 
 #include "WBC/FloatingBaseModel.h"
-#include "orientation_tools.h"
-#include "Utilities_print.h"
+#include "Utilities/orientation_tools.h"
+#include "Utilities/Utilities_print.h"
 
 using namespace ori;
 using namespace spatial;

@@ -12,7 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "cppTypes.h"
+#include "Utilities/cppTypes.h"
 
 
 /// GO1 固定为四条腿，每条腿三个电机关节，共十二个关节。

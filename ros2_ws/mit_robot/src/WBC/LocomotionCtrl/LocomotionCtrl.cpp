@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "orientation_tools.h"
+#include "Utilities/orientation_tools.h"
 
 // 四足运动 WBC 适配层：机身姿态和位置始终作为任务；每条腿根据接触状态，
 // 在“支撑接触约束”与“摆动足位置任务”之间二选一。

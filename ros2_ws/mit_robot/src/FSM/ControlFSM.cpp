@@ -7,7 +7,7 @@
 
 namespace
 {
-
+//将用户控制模式转换成 FSM 状态名称。
 FSM_StateName stateForMode(ControlMode mode) noexcept
 {
   switch (mode) {
@@ -20,7 +20,7 @@ FSM_StateName stateForMode(ControlMode mode) noexcept
   }
   return FSM_StateName::INVALID;
 }
-
+//2. JointPdState这是 ControlFSM.cpp 内部定义的一个简单状态。
 template<typename T>
 class JointPdState final : public FSM_State<T>
 {
@@ -40,6 +40,7 @@ public:
     auto & controller = *this->_data->leg_controller;
     controller.zeroCommand();
     controller.setEnabled(true);
+    //遍历四条腿
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
       const LegId leg_id = static_cast<LegId>(leg);
       controller.commands[leg].position_desired =
@@ -48,14 +49,16 @@ public:
       controller.commands[leg].kd_joint.setConstant(T(2));
     }
   }
-
+  
+  /*读取用户选择的控制模式，并转换成下一个 FSM 状态。*/
   FSM_StateName checkTransition() override
   {
     this->nextStateName = stateForMode(this->_data->desired_state->mode);
     this->transitionDuration = T(0);
     return this->nextStateName;
   }
-
+  
+  /*切换时再执行一次 Joint PD 控制。作用是避免切换过程中出现无效命令。*/
   TransitionData<T> transition() override
   {
     run();
@@ -68,6 +71,7 @@ public:
 
 }  // namespace
 
+//创建各个状态
 template<typename T>
 ControlFSM<T>::ControlFSM(
   const Quadruped<T> & quadruped, StateEstimate<T> & state_estimate,
@@ -94,6 +98,7 @@ ControlFSM<T>::ControlFSM(
   initialize();
 }
 
+//FSM 默认从 Passive 开始。调用 Passive 的进入函数，默认下一个状态也为 Passive。
 template<typename T>
 void ControlFSM<T>::initialize()
 {
@@ -104,15 +109,20 @@ void ControlFSM<T>::initialize()
   operating_mode_ = FSM_OperatingMode::NORMAL;
 }
 
+//调度器的执行逻辑
 template<typename T>
 void ControlFSM<T>::runFSM()
 {
   // 前置检查针对输入状态；失败时立即进入 ESTOP，并输出被动命令。
   operating_mode_ = safetyPreCheck();
+  //检查失败,立即进入紧急停止流程
   if (operating_mode_ == FSM_OperatingMode::ESTOP) {
+    //如果当前不是 Passive，先调用当前状态的 onExit()。
     if (currentState != statesList.passive.get()) {currentState->onExit();}
     currentState = statesList.passive.get();
+    //切换到 Passive，并执行其进入逻辑。
     currentState->onEnter();
+    //清除原来准备切换的目标状态。
     nextState = currentState;
     nextStateName = currentState->stateName;
     currentState->run();
@@ -153,13 +163,16 @@ void ControlFSM<T>::runFSM()
   ++iteration_;
 }
 
+//执行控制前安全检查。
 template<typename T>
 FSM_OperatingMode ControlFSM<T>::safetyPreCheck()
 {
-  // 1.4 rad 约等于 80 度；姿态过大时继续输出站立力矩可能让机器人翻转得更快。
+  // 如果状态估计：无效；姿态包含 NaN；姿态包含 Inf；直接急停。
   if (!data.state_estimate->valid || !data.state_estimate->rpy.allFinite()) {
     return FSM_OperatingMode::ESTOP;
   }
+  /*如果当前状态要求检查姿态，则调用安全检查器。不是所有状态都一定检查安全姿态。
+    例如 Passive 状态可能不需要继续判断姿态，因为它本来就不输出主动支撑力矩。*/
   if (currentState->checkSafeOrientation &&
     !safety_checker_->checkSafeOrientation())
   {
@@ -168,6 +181,7 @@ FSM_OperatingMode ControlFSM<T>::safetyPreCheck()
   return operating_mode_;
 }
 
+/*检查状态输出的腿部命令。*/
 template<typename T>
 FSM_OperatingMode ControlFSM<T>::safetyPostCheck()
 {
@@ -189,6 +203,8 @@ FSM_OperatingMode ControlFSM<T>::safetyPostCheck()
     }
   }
   if (operating_mode_ != FSM_OperatingMode::ESTOP) {
+    /*检查足端期望位置。Locomotion 中之前关闭了 checkPDesFoot，
+    因为 Locomotion 自己管理世界坐标摆动足目标。*/
     if (currentState->checkPDesFoot) {safety_checker_->checkPDesFoot();}
     if (currentState->checkForceFeedForward) {
       safety_checker_->checkForceFeedForward();
