@@ -128,6 +128,7 @@ ament_export_libraries(mymit_robot_model)
 add_executable(mymit_robot_user
   user/main.cpp
   user/RobotRunner.cpp
+  user/SimulationDiagnostics.cpp
   user/SimulationBridge.cpp
 )
 target_compile_definitions(mymit_robot_user PRIVATE

@@ -72,6 +72,9 @@ public:
   void setUseWbc(bool enabled) noexcept {data.use_wbc = enabled;}
   /** 设置 Locomotion 状态使用的固定前进速度，单位 m/s。 */
   void setLocomotionForwardVelocity(T velocity);
+  /** 设置 Locomotion 的机身系前后、左右速度和偏航角速度。 */
+  void setLocomotionVelocityCommand(
+    T forward_velocity, T lateral_velocity, T yaw_rate);
   
   //所有状态共享的数据。
   ControlFSMData < T > data;

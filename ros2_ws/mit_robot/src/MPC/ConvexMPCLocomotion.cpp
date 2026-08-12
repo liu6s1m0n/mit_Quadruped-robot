@@ -1,5 +1,6 @@
 #include "MPC/ConvexMPCLocomotion.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -17,7 +18,8 @@ ConvexMPCLocomotion<T>::ConvexMPCLocomotion(
   //构造站立步态
   stand_(settings.horizon, {0, 0, 0, 0},
     {settings.horizon, settings.horizon, settings.horizon, settings.horizon}, "stand"),
-  //构造 TROT 步态
+  // 构造 60% 支撑率的 TROT：默认 10 段中支撑 6 段、摆动 4 段。
+  // 当前 FSM 每段接触时序为 50 ms，因此完整摆动时间为 0.20 s。
   trot_(settings.horizon, {0, settings.horizon / 2, settings.horizon / 2, 0},
     {settings.horizon * 3 / 5, settings.horizon * 3 / 5,
       settings.horizon * 3 / 5, settings.horizon * 3 / 5}, "trot_walk")
@@ -36,7 +38,9 @@ void ConvexMPCLocomotion<T>::initialize() noexcept
 {
   iteration_ = 0;
   command_initialized_ = false;
-  commanded_forward_velocity_ = T(0);
+  commanded_velocity_body_.setZero();
+  commanded_yaw_rate_ = T(0);
+  command_yaw_ = T(0);
   cached_reaction_forces_world_ = {};
   cached_solution_valid_ = false;
   cached_solution_converged_ = false;
@@ -45,14 +49,30 @@ void ConvexMPCLocomotion<T>::initialize() noexcept
 template<typename T>
 void ConvexMPCLocomotion<T>::setForwardVelocity(T velocity)
 {
-  constexpr T maximum_velocity = T(1);
-  if (!std::isfinite(static_cast<double>(velocity)) ||
-    std::abs(velocity) > maximum_velocity)
+  setVelocityCommand(velocity, T(0), T(0));
+}
+
+template<typename T>
+void ConvexMPCLocomotion<T>::setVelocityCommand(
+  T forward_velocity, T lateral_velocity, T yaw_rate)
+{
+  constexpr T maximum_linear_velocity = T(1);
+  constexpr T maximum_yaw_rate = T(2);
+  const Vec2<T> linear_velocity(forward_velocity, lateral_velocity);
+  if (!linear_velocity.allFinite() ||
+    linear_velocity.norm() > maximum_linear_velocity)
   {
     throw std::invalid_argument(
-            "locomotion forward velocity must be within [-1, 1] m/s");
+            "locomotion planar velocity magnitude must not exceed 1 m/s");
   }
-  forward_velocity_ = velocity;
+  if (!std::isfinite(static_cast<double>(yaw_rate)) ||
+    std::abs(yaw_rate) > maximum_yaw_rate)
+  {
+    throw std::invalid_argument(
+            "locomotion yaw rate must be within [-2, 2] rad/s");
+  }
+  velocity_body_ = linear_velocity;
+  yaw_rate_ = yaw_rate;
 }
 
 template<typename T>
@@ -60,20 +80,42 @@ DesiredState<T> ConvexMPCLocomotion<T>::setupCommand(
   const StateEstimate<T> & estimate, const DesiredState<T> & desired)
 {
   DesiredState<T> command = desired;
-  if (!command_initialized_) {command_initialized_ = true;}
+  if (!command_initialized_) {
+    command_yaw_ = desired.body_rpy.z();
+    command_initialized_ = true;
+  }
 
-  // “向前”由期望偏航角定义，再转换到 MPC 使用的世界坐标系。
-  const T maximum_velocity_step =
-    maximum_forward_acceleration_ * control_time_step_;
-  commanded_forward_velocity_ += std::clamp(
-    forward_velocity_ - commanded_forward_velocity_,
-    -maximum_velocity_step, maximum_velocity_step);
-  const T yaw = desired.body_rpy.z();
+  // 对二维线速度做向量限幅，方向切换时总加速度也不会超过设定值。
+  Vec2<T> velocity_change = velocity_body_ - commanded_velocity_body_;
+  const T maximum_velocity_step = maximum_linear_acceleration_ * control_time_step_;
+  if (velocity_change.norm() > maximum_velocity_step) {
+    velocity_change *= maximum_velocity_step / velocity_change.norm();
+  }
+  commanded_velocity_body_ += velocity_change;
+
+  const T maximum_yaw_rate_step = maximum_yaw_acceleration_ * control_time_step_;
+  commanded_yaw_rate_ += std::clamp(
+    yaw_rate_ - commanded_yaw_rate_, -maximum_yaw_rate_step,
+    maximum_yaw_rate_step);
+
+  // 将连续偏航目标重表达到实测偏航附近，跨越 +/-pi 时避免产生 2*pi 跳变。
+  const T relative_yaw = command_yaw_ - estimate.rpy.z();
+  command_yaw_ = estimate.rpy.z() +
+    std::atan2(std::sin(relative_yaw), std::cos(relative_yaw));
+  command_yaw_ += commanded_yaw_rate_ * control_time_step_;
+  command.body_rpy.x() = T(0);
+  command.body_rpy.y() = T(0);
+  command.body_rpy.z() = command_yaw_;
+
+  const T cosine_yaw = std::cos(command_yaw_);
+  const T sine_yaw = std::sin(command_yaw_);
   command.body_velocity_world <<
-    commanded_forward_velocity_ * std::cos(yaw),
-    commanded_forward_velocity_ * std::sin(yaw), T(0);
+    cosine_yaw * commanded_velocity_body_.x() -
+    sine_yaw * commanded_velocity_body_.y(),
+    sine_yaw * commanded_velocity_body_.x() +
+    cosine_yaw * commanded_velocity_body_.y(), T(0);
   command.body_acceleration_world.setZero();
-  command.body_angular_velocity.setZero();
+  command.body_angular_velocity << T(0), T(0), commanded_yaw_rate_;
   // 速度遥控模式不长期积分世界 x/y 目标。每周期从当前实测位置生成短时
   // 预测轨迹，可避免打滑或跟踪误差累积成不断增大的“追赶位置”，进而让
   // MPC 把实际速度推到命令速度两倍以上。
@@ -82,7 +124,8 @@ DesiredState<T> ConvexMPCLocomotion<T>::setupCommand(
   command_position_world_.z() = desired.body_position_world.z();
   command.body_position_world = command_position_world_;
   command.valid = desired.valid && command.body_position_world.allFinite() &&
-    command.body_velocity_world.allFinite();
+    command.body_velocity_world.allFinite() && command.body_rpy.allFinite() &&
+    command.body_angular_velocity.allFinite();
   return command;
 }
 

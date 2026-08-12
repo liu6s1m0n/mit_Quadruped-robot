@@ -16,6 +16,7 @@ TEST(ControlFSMTest, TransitionsBetweenProjectControlModes)
     context.quadruped, context.estimate, context.joints, context.leg_controller,
     context.gait_scheduler, context.desired, context.control_time_step);
   EXPECT_NO_THROW(fsm.setLocomotionForwardVelocity(0.3F));
+  EXPECT_NO_THROW(fsm.setLocomotionVelocityCommand(0.0F, 0.2F, 0.5F));
 
   EXPECT_EQ(static_cast<std::uint8_t>(ControlMode::BalanceStand), 2);
   EXPECT_EQ(static_cast<std::uint8_t>(ControlMode::Locomotion), 3);

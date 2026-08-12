@@ -50,6 +50,7 @@ add_robot_unit_test(test_fsm_safety fsm/safety_checker_test.cpp)
 ament_add_gtest(test_integration_simulation
   integration/simulation_estimation_consistency_test.cpp
   ${PROJECT_SOURCE_DIR}/user/RobotRunner.cpp
+  ${PROJECT_SOURCE_DIR}/user/SimulationDiagnostics.cpp
 )
 target_compile_definitions(test_integration_simulation PRIVATE
   MYMIT_ROBOT_TEST_SCENE_PATH="${PROJECT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"

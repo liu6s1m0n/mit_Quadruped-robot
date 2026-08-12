@@ -11,6 +11,10 @@ constexpr std::array<LegId, kNumLegs> kLegOrder{
   LegId::FR, LegId::FL, LegId::RR, LegId::RL};
 }
 
+/*使用仿真器数据创建指定腿的传感器。
+  这里传入：数据源：SIMULATOR；
+  腿编号；MuJoCo 模型；MuJoCo 数据。
+  以后如果切换真实硬件，只需要替换传感器创建方式，上层控制器不用修改。*/
 RobotRunner::LegSensorOwners RobotRunner::makeLegSensors(
   const mjModel * model, const mjData * data)
 {
@@ -21,6 +25,8 @@ RobotRunner::LegSensorOwners RobotRunner::makeLegSensors(
   return sensors;
 }
 
+/*将裸指针数组传给状态估计器。
+  传感器的生命周期仍然由 leg_sensors_ 管理。*/
 RobotRunner::LegSensorPointers RobotRunner::sensorPointers(
   const LegSensorOwners & sensors)
 {
@@ -33,11 +39,17 @@ RobotRunner::LegSensorPointers RobotRunner::sensorPointers(
 
 RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
 : model_(model), data_(data),
+  /*Unitree Go1 机器人模型；*/
   quadruped_(makeQuadruped<float>(RobotType::UNITREE_GO1)),
+  /*腿部控制器*/
   leg_controller_(quadruped_),
+  /*IMU 传感器*/
   imu_(makeImu(ImuSource::SIMULATOR, model, data)),
+  /*四条腿传感器*/
   leg_sensors_(makeLegSensors(model, data)),
+  /*腿部传感器指针*/
   leg_sensor_pointers_(sensorPointers(leg_sensors_)),
+  /*步态调度器*/
   gait_scheduler_(static_cast<float>(model == nullptr ? 0.0 : model->opt.timestep))
 {
   if (model_ == nullptr || data_ == nullptr) {
@@ -45,29 +57,45 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
   }
 
   // 仿真时间步是所有滤波器和轨迹推进的共同时间基准。
+  /*创建状态估计器参数*/
   PositionVelocityEstimatorParameters<float> estimator_parameters;
+  /*把 MuJoCo 时间步作为状态估计器的标准时间步*/
   estimator_parameters.nominal_time_step = static_cast<float>(model_->opt.timestep);
+  /*确保最大时间步不会小于实际仿真时间步。
+    这可以防止：仿真步长比默认值大；估计器误判时间间隔；速度积分和滤波器参数异常。*/
   estimator_parameters.maximum_time_step = std::max(
     estimator_parameters.maximum_time_step,
     estimator_parameters.nominal_time_step);
+  /*表示仿真中可以直接使用 MuJoCo 真值姿态。
+    真实机器人则通常需要使用：IMU 积分；
+    互补滤波；EKF；接触约束估计。*/
   state_estimator_ = std::make_unique<PositionVelocityEstimator<float>>(
     quadruped_, *imu_, leg_sensor_pointers_,
     OrientationEstimatorMode::SIMULATION_TRUTH, estimator_parameters);
 
-  // 默认进入平衡站立；真正输出命令前还会经过 0.4 秒关节初始化。
+  // 默认进入平衡站立；真正输出命令前先经过 0.4 秒平滑关节初始化。
   desired_state_.mode = ControlMode::BalanceStand;
+  /*默认机身高度设为机器人模型中的名义高度*/
   desired_state_.body_position_world.z() = quadruped_.nominalBodyHeight();
+  /*标记期望状态有效*/
   desired_state_.valid = true;
+  /*目标高度和当前命令高度都设为名义高度*/
   standing_height_target_ = quadruped_.nominalBodyHeight();
   standing_height_command_ = standing_height_target_;
+  /*将所有共享对象传给总状态机。
+    注意这些对象都是 RobotRunner 的成员：因此 RobotRunner 必须比 ControlFSM 活得更久*/
   control_fsm_ = std::make_unique<ControlFSM<float>>(
     quadruped_, state_estimate_, joint_states_, leg_controller_, gait_scheduler_,
     desired_state_, static_cast<float>(model_->opt.timestep));
+  /*强制启用 WBC。*/
   control_fsm_->setUseWbc(true);
   setWalkingForwardSpeed(defaultWalkingForwardSpeed());
+  /*初始化完成后，清零并关闭腿部命令。
+    即使 FSM 默认是 BalanceStand，也不会在第一次传感器更新前直接输出力矩。*/
   disableCommands();
 }
 
+/*设置目标控制模式*/
 void RobotRunner::setControlMode(ControlMode mode) noexcept
 {
   if (desired_state_.mode == mode) {return;}
@@ -84,13 +112,24 @@ void RobotRunner::setControlMode(ControlMode mode) noexcept
   desired_state_.mode = mode;
 }
 
+/*把速度传递给 FSM 内部的 Locomotion*/
 void RobotRunner::setWalkingForwardSpeed(float speed)
 {
   control_fsm_->setLocomotionForwardVelocity(speed);
 }
 
+void RobotRunner::setLocomotionVelocityCommand(
+  float forward_velocity, float lateral_velocity, float yaw_rate)
+{
+  control_fsm_->setLocomotionVelocityCommand(
+    forward_velocity, lateral_velocity, yaw_rate);
+}
+
+/*设置站立高度*/
 void RobotRunner::setStandingHeight(float height)
 {
+  /*不能是 NaN；不能是 Inf；
+    不能低于 0.18 m；不能高于 0.34 m。*/
   if (!std::isfinite(height) || height < minimumStandingHeight() ||
     height > maximumStandingHeight())
   {
@@ -98,6 +137,7 @@ void RobotRunner::setStandingHeight(float height)
   }
   standing_height_target_ = height;
 }
+
 
 void RobotRunner::reset()
 {
@@ -129,13 +169,19 @@ void RobotRunner::updateStandingHeightCommand()
   }
 
   // 速率限制换算为“每个控制周期允许变化的最大高度”。
+  // 如果时间步为 0.001 s，则每个控制周期最多改变0. × 0.001 = 0.00008 m：
   const float maximum_step =
     standing_height_rate_limit_ * static_cast<float>(model_->opt.timestep);
+  //计算目标高度和当前高度之间的误差
   const float error = standing_height_target_ - standing_height_command_;
   standing_height_command_ += std::clamp(error, -maximum_step, maximum_step);
+  //将平滑后的高度写回 FSM 使用的期望状态
   desired_state_.body_position_world.z() = standing_height_command_;
 }
 
+/*关节初始化完成必须满足：
+  初始化已经开始；当前仿真时间减去开始时间大于等于 0.4 秒。
+  如果还没有开始，即使时间足够长，也返回 false。*/
 bool RobotRunner::jointInitializationComplete() const noexcept
 {
   return joint_initialization_started_ &&
@@ -143,42 +189,56 @@ bool RobotRunner::jointInitializationComplete() const noexcept
          joint_initialization_duration_;
 }
 
+/*这个函数负责启动时平滑进入默认姿态。*/
 void RobotRunner::prepareJointInitialization()
 {
   if (!joint_initialization_started_) {
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+      //锁存四条腿当前实际关节角，作为轨迹起点
       initial_joint_positions_[leg] = leg_controller_.datas[leg].q;
     }
+    //记录初始化起始时间
     joint_initialization_start_time_ = static_cast<float>(data_->time);
     joint_initialization_started_ = true;
   }
-
+  //计算已经经过的时间。
   const float elapsed =
     static_cast<float>(data_->time) - joint_initialization_start_time_;
+  //将准备时间化为[0, 1]区间的相位，超过 1.0 的部分会被 clamp 掉。
   const float phase = std::clamp(
     elapsed / joint_initialization_duration_, 0.0F, 1.0F);
   // 三次 smoothstep 的起止速度均为零，比线性插值更不容易产生冲击。
+  /*它的特点是：起点速度为零；终点速度为零；比线性插值冲击更小。*/
   const float blend = phase * phase * (3.0F - 2.0F * phase);
+  /*计算 smoothstep 的时间导数，作为期望关节速度。上一步的导数形式*/
   const float blend_rate =
     6.0F * phase * (1.0F - phase) / joint_initialization_duration_;
-
+  /*先清除所有旧控制模式命令，再开启腿部输出。*/
   leg_controller_.zeroCommand();
   leg_controller_.setEnabled(true);
+
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    /*target,travel这两个是啥玩意*/
     const Vec3<float> target = quadruped_.leg(kLegOrder[leg]).joints.home_position;
     const Vec3<float> travel = target - initial_joint_positions_[leg];
     auto & command = leg_controller_.commands[leg];
     command.position_desired = initial_joint_positions_[leg] + blend * travel;
     command.velocity_desired = blend_rate * travel;
+    // 初始化阶段恢复经过验证的 PD；行走提速只在 Locomotion 摆动腿生效，
+    // 避免把更快的启动过程误认为电机行走速度提升。
     command.kp_joint.setConstant(60.0F);
     command.kd_joint.setConstant(3.0F);
   }
 }
 
+//从 LegController 生成四条腿最终输出命令。
 bool RobotRunner::collectJointCommands()
 {
   bool commands_valid = true;
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    /*调用 LegController::command()：
+      读取当前腿反馈；计算笛卡尔足端力；使用 JᵀF 转换为关节力矩；
+      限制前馈力矩；生成 JointCommand。*/
     joint_commands_[leg] = leg_controller_.command(
       kLegOrder[leg], static_cast<float>(data_->time));
     commands_valid = joint_commands_[leg].enabled && commands_valid;
@@ -187,21 +247,26 @@ bool RobotRunner::collectJointCommands()
   return commands_valid;
 }
 
+/*设置完整的目标状态。*/
 void RobotRunner::setDesiredState(const DesiredState<float> & desired)
 {
+  /*检查所有主要目标量是否有限*/
   if (!desired.body_position_world.allFinite() ||
     !desired.body_velocity_world.allFinite() ||
     !desired.body_acceleration_world.allFinite() || !desired.body_rpy.allFinite() ||
     !desired.body_angular_velocity.allFinite())
-  {
+  {/*发现 NaN 或 Inf 时拒绝整个目标状态*/
     throw std::invalid_argument("desired robot state contains a non-finite value");
   }
+  /*如果目标模式是 BalanceStand，则同步更新目标站立高度。
+                     这会触发 0.18～0.34 m 范围检查*/
   if (desired.mode == ControlMode::BalanceStand) {
     setStandingHeight(desired.body_position_world.z());
   }
   desired_state_ = desired;
 }
 
+/*统一关闭全部腿部命令。*/
 void RobotRunner::disableCommands() noexcept
 {
   leg_controller_.zeroCommand();
@@ -215,9 +280,12 @@ void RobotRunner::disableCommands() noexcept
 bool RobotRunner::run()
 {
   // 1. 推进一步态并把“预计接触概率”交给状态估计器。
+  //让步态调度器前进一步。它会更新：当前 gait phase；
+  //每条腿的接触概率；摆动/支撑状态。
   gait_scheduler_.step();
   state_estimator_->setContactProbabilities(
     gait_scheduler_.gait_data.estimatorContactProbabilities());
+  /*运行状态估计器。如果失败：*/
   if (!state_estimator_->run()) {
     disableCommands();
     return false;

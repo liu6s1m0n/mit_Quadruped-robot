@@ -28,8 +28,8 @@ struct SolverSettings
   T minimum_normal_force = T(0);
   T maximum_normal_force = T(120);
   T force_regularization = T(1e-5);
-  //参数MPC 迭代次数，一个重要的降低运算次数
-  std::size_t maximum_iterations = 100;
+  // MPC最大迭代次数由100降至60；MPC仍以20 Hz求解，不影响500 Hz WBC/电机闭环。
+  std::size_t maximum_iterations = 60;
   //收敛容差 接触精度，依靠迭代法所以降低精度也可以减少计算
   T convergence_tolerance = T(1e-5);
 

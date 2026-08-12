@@ -241,6 +241,14 @@ void ControlFSM<T>::setLocomotionForwardVelocity(T velocity)
 }
 
 template<typename T>
+void ControlFSM<T>::setLocomotionVelocityCommand(
+  T forward_velocity, T lateral_velocity, T yaw_rate)
+{
+  statesList.locomotion->setVelocityCommand(
+    forward_velocity, lateral_velocity, yaw_rate);
+}
+
+template<typename T>
 void ControlFSM<T>::printInfo(int option)
 {
   if (option == 0 && ++print_iteration_ < print_num_) {return;}

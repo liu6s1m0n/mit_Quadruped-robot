@@ -37,13 +37,12 @@ FSM_State_Locomotion<T>::FSM_State_Locomotion(
   wbc_ctrl_->setBodyOrientationGains(
     Vec3<T>(T(100), T(100), T(50)),
     Vec3<T>(T(10), T(10), T(3)));
-  // WBC 默认 Kp=5 对 GO1 的摆动腿过软，连续行走时关节跟踪误差会由
-  // 0.05 rad 增长到 0.4 rad 以上，使实际脚落在规划点后方。与稳定站立
-  // 使用同一组局部阻抗，前馈力矩仍由 WBIC 计算并受模型力矩上限约束。
-  // PD参数
+  // 行走关节 PD 按电机职责分别设置：Hip 保持Kp=30，避免四腿向机身
+  // 内侧快速收缩；thigh/calf使用Kp=42跟随高速摆动轨迹。
+  // Kd=[4,4.5,4.5]提供适量阻尼；继续加硬会让落脚过冲并造成小腿擦地。
   wbc_ctrl_->setJointGains(
-  Vec3<T>(T(30), T(30), T(30)),
-  Vec3<T>(T(3), T(3), T(3)));
+    Vec3<T>(T(30), T(42), T(42)),
+    Vec3<T>(T(4), T(4.5), T(4.5)));
   //安全检查
   this->turnOnAllSafetyChecks();
   this->checkPDesFoot = false;
@@ -64,8 +63,8 @@ void FSM_State_Locomotion<T>::onEnter()
     MPC 的接触预测；GaitScheduler 的实际接触逻辑。
     如果两者不一致，就可能出现：MPC 认为后腿支撑；
     GaitScheduler 认为后腿摆动；WBC 约束错误；足端轨迹不断漂移或打滑。*/
-  // 当前中低速行走使用 60% 支撑率的 TROT_WALK，使两组对角腿在换相时有短暂
-  // 重叠。50% TROT 对触地延迟没有裕量，连续行走时会逐步丢失机身高度。
+  // 当前行走使用 60% 支撑率的 TROT_WALK：0.5 s 周期内支撑 0.30 s、
+  // 摆动 0.20 s；与 MPC 接触表保持一致，避免状态估计接触约束错相。
   this->_data->gait_scheduler->requestGait(GaitType::TROT_WALK);
 }
 
@@ -81,6 +80,13 @@ template<typename T>
 void FSM_State_Locomotion<T>::setForwardVelocity(T velocity)
 {
   mpc_->setForwardVelocity(velocity);
+}
+
+template<typename T>
+void FSM_State_Locomotion<T>::setVelocityCommand(
+  T forward_velocity, T lateral_velocity, T yaw_rate)
+{
+  mpc_->setVelocityCommand(forward_velocity, lateral_velocity, yaw_rate);
 }
 
 /*checkTransition()每次检查状态切换时，迭代计数加一。*/
@@ -311,10 +317,22 @@ void FSM_State_Locomotion<T>::LocomotionControlStep()
   }
 
   if (this->_data->use_wbc) {
-    // 正常路径由 WBC 同时输出位置、速度和前馈力矩。
-    wbc_ctrl_->runAndApply(
+    // WBC和最终关节PD均保持500 Hz。测试确认WBC降频会使支撑力和足端约束
+    // 滞后并造成小腿擦地，因此计算削减只放在20 Hz的MPC内部。
+    const bool wbc_valid = wbc_ctrl_->runAndApply(
       &wbc_data_, *this->_data->state_estimate, *this->_data->joint_states,
       *this->_data->leg_controller);
+    if (wbc_valid) {
+      // 直接提高摆动腿电机期望关节转速；支撑腿保持KinWBC原始速度。
+      for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+        if (result.contact_state[leg]) {continue;}
+        auto & velocity = this->_data->leg_controller->commands[leg].velocity_desired;
+        velocity = velocity.cwiseProduct(swing_joint_velocity_scale_);
+        const auto leg_id = static_cast<LegId>(leg);
+        const Vec3<T> & limit = this->_data->quadruped->leg(leg_id).joints.velocity_limit;
+        velocity = velocity.cwiseMin(limit).cwiseMax(-limit);
+      }
+    }
   } else {
     // 关闭 WBC 时的降级路径只发送足端前馈力，主要用于调试算法分层。
     auto & controller = *this->_data->leg_controller;

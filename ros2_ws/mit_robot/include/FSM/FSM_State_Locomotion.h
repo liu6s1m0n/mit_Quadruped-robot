@@ -30,6 +30,8 @@ public:
   void onExit() override;
   /** 将用户层速度命令传递给本状态持有的 MPC。 */
   void setForwardVelocity(T velocity);
+  /** 设置机身系前后、左右和自转速度。 */
+  void setVelocityCommand(T forward_velocity, T lateral_velocity, T yaw_rate);
 
   /** 返回最近一次交给 WBC 的单腿世界系足端目标，便于运行时诊断。 */
   const Vec3 < T > & footPositionTargetWorld(LegId leg) const noexcept
@@ -70,10 +72,14 @@ private:
   std::array < FootSwingTrajectory < T >, kNumLegs > swing_trajectories_ {};
   /*记录每条腿是否已经开始当前摆动周期。*/
   std::array < bool, kNumLegs > swing_active_ {};
-  /*参数1：摆动腿抬腿高度  原来0.06  -> 0.10*/
+  /*参数1：摆动腿抬脚高度。保持 0.10 m，不再用增加高度间接提高速度。*/
   T swing_height_ = T(0.10);
   /*参数2：单个步周期内最大水平步长为 18 cm。 -> 0.20*/
   T maximum_step_length_ = T(0.20);
+  /*只提高摆动腿的关节速度前馈：Hip保持原速以稳定支撑宽度，
+    thigh/calf提高50%；最终仍按GO1关节速度上限裁剪。*/
+  Vec3<T> swing_joint_velocity_scale_ =
+    Vec3<T>(T(1), T(1.5), T(1.5));
   std::size_t iteration_ = 0;
 };
 

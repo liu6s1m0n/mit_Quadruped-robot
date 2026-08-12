@@ -49,6 +49,26 @@ TEST(MpcLocomotion, PublishesUnambiguousContactStateAndGaitTiming)
   }
 }
 
+TEST(MpcLocomotion, SupportsBodyFrameLateralMotionAndYawRotation)
+{
+  const auto quadruped = robots::unitree_go1::makeModel<double>();
+  mpc::SolverSettings<double> settings;
+  settings.horizon = 4;
+  mpc::ConvexMPCLocomotion<double> controller(quadruped, 0.002, 15, settings);
+  controller.setGait(GaitType::STAND);
+  controller.setVelocityCommand(0.0, 0.3, 0.8);
+
+  const auto result = controller.run(
+    test_support::standingEstimate(), test_support::standingDesired(),
+    test_support::standingFeet());
+  ASSERT_TRUE(result.valid);
+  // 线加速度 0.75 m/s^2、角加速度 0.8 rad/s^2 在首个 2 ms 周期的斜坡结果。
+  EXPECT_NEAR(result.command.body_velocity_world.x(), 0.0, 1.0e-7);
+  EXPECT_NEAR(result.command.body_velocity_world.y(), 0.0015, 1.0e-7);
+  EXPECT_NEAR(result.command.body_angular_velocity.z(), 0.0016, 1.0e-12);
+  EXPECT_GT(result.command.body_rpy.z(), 0.0);
+}
+
 TEST(MpcLocomotion, SolvesAtConfiguredIntervalAndReusesForces)
 {
   const auto quadruped = robots::unitree_go1::makeModel<double>();
@@ -88,6 +108,8 @@ TEST(MpcLocomotion, RejectsUnsafeForwardVelocity)
   const auto quadruped = robots::unitree_go1::makeModel<double>();
   mpc::ConvexMPCLocomotion<double> controller(quadruped, 0.002);
   EXPECT_THROW(controller.setForwardVelocity(1.01), std::invalid_argument);
+  EXPECT_THROW(controller.setVelocityCommand(0.8, 0.8, 0.0), std::invalid_argument);
+  EXPECT_THROW(controller.setVelocityCommand(0.0, 0.0, 2.01), std::invalid_argument);
 }
 
 }  // namespace

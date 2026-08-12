@@ -324,9 +324,10 @@ void GaitScheduler<T>::createGait()
         Vec4<T>(T(0), T(0.5), T(0.25), T(0.75)), unit_scale, true);
       break;
     
-    /*参数含义是：0.5 ：完整步态周期，单位秒   0.6：支撑相占比
-      摆动时间约为 0.5 × (1 - 0.6) = 0.2 秒
-      想让腿切换更快，可以把周期调小，例如："TROT_WALK", T(0.4), T(0.6)*/
+    /*参数含义：0.5 是完整步态周期（秒），0.6 是支撑相占比。
+      当前支撑时间为 0.30 秒、摆动时间为 0.20 秒。这里保持原接触时序，
+      使 GaitScheduler、状态估计器和 20 Hz MPC 接触表继续严格同步；
+      抬脚响应改由 swing_height_ 和行走关节 PD 提升。*/
     case GaitType::TROT_WALK:
       configureGait(
         "TROT_WALK", T(0.5), T(0.6), all_legs,
