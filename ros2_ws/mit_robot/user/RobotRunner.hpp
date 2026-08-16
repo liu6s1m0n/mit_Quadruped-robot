@@ -61,6 +61,8 @@ public:
   }
   /*返回当前状态估计结果。*/
   const StateEstimate<float> & stateEstimate() const noexcept {return state_estimate_;}
+  /** 当前 FSM 状态对应的公开控制模式；只读，不参与控制计算。 */
+  ControlMode currentControlMode() const noexcept;
   /*返回机器人模型*/
   const Quadruped<float> & quadruped() const noexcept {return quadruped_;}
 
@@ -84,7 +86,7 @@ private:
   bool collectJointCommands();
   /*清零并关闭所有腿部输出。*/
   void disableCommands() noexcept;
- 
+
   /*保存 MuJoCo 模型和当前数据。
     它们都是非拥有型指针，RobotRunner 不负责释放。*/
   const mjModel * model_ = nullptr;

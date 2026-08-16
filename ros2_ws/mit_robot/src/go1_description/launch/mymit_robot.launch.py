@@ -1,26 +1,45 @@
-"""同时启动原生 MuJoCo 控制程序和用于接收 ROS 2 高度命令的服务节点."""
+"""Launch the ROS-native GO1 controller and its robot description."""
 
 from launch import LaunchDescription
-from launch.actions import Shutdown
+from launch.actions import DeclareLaunchArgument, Shutdown
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-
-# 启动高度服务和工程自带仿真控制程序；控制程序退出时关闭服务节点。
+from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    # 高度服务通过本地 IPC 把 ROS 2 请求转交给仿真进程；仿真退出时关闭整组节点。
+    package_share = FindPackageShare("mymit_robot")
+    parameter_file = PathJoinSubstitution([package_share, "config", "mymit_robot.yaml"])
+    xacro_file = PathJoinSubstitution([package_share, "urdf", "go1.urdf.xacro"])
+    robot_description = ParameterValue(
+        Command([FindExecutable(name="xacro"), " ", xacro_file]), value_type=str
+    )
+    namespace = LaunchConfiguration("namespace")
+
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "namespace",
+            default_value="",
+            description="Optional namespace for all robot topics and services.",
+        ),
         Node(
-            package="mymit_robot",
-            executable="mymit_robot_height_service",
-            name="mymit_robot_standing_height_service",
+            package="robot_state_publisher",
+            executable="robot_state_publisher",
+            namespace=namespace,
+            parameters=[
+                {"robot_description": robot_description, "use_sim_time": True}
+            ],
             output="screen",
         ),
         Node(
             package="mymit_robot",
-            executable="mymit_robot_user",
-            name="mymit_robot_simulation",
+            executable="mymit_robot_node",
+            name="controller",
+            namespace=namespace,
+            parameters=[parameter_file],
             output="screen",
+            emulate_tty=True,
             on_exit=Shutdown(),
         ),
     ])

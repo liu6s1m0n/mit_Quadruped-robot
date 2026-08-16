@@ -1,30 +1,87 @@
-# GO1 控制参数表
+# GO1 ROS 2 控制工程
 
-本文只记录当前正式控制链中可人为调整的控制、估计、步态、求解和调度参数。质量、惯量、连杆尺寸、关节限位、额定转矩等机器人固有参数不在此表中。
+工程现在以标准 ROS 2 节点运行 MuJoCo 和原有控制链。ROS 2 只作为外围适配层，`RobotRunner -> ControlFSM -> MPC/WBC -> LegController` 的算法和控制周期没有改变。
 
-参数优先级按 `初始化默认值 → 状态内覆盖值 → user/main.cpp 最终配置值` 排列；同一参数出现多次时，以最右侧、最接近正式入口的值为准。`未覆盖` 表示默认值就是当前生效值，`未启用` 表示代码提供该参数，但当前正式仿真链没有使用它。
+MuJoCo 控制链被编译为本地后端，并由 ROS 节点以 `RTLD_LOCAL | RTLD_DEEPBIND` 加载。这用于隔离 MuJoCo 3.11 内置的第三方 XML 符号与 ROS 2/Fast DDS，避免两套库在同一进程发生符号冲突；它不改变控制数据和算法调用顺序。
+
+## 构建和启动
+
+```bash
+cd ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select mymit_robot --symlink-install
+source install/setup.bash
+ros2 launch mymit_robot mymit_robot.launch.py
+```
+
+可用命名空间启动多机器人实例：
+
+```bash
+ros2 launch mymit_robot mymit_robot.launch.py namespace:=go1
+```
+
+启动参数集中在 `mit_robot/src/go1_description/config/mymit_robot.yaml`。launch 同时运行控制节点和 `robot_state_publisher`，场景路径通过 ament 索引从安装目录解析，不再依赖源码目录或当前工作目录。
+
+## ROS 2 接口
+
+输入接口：
+
+- `cmd_vel` (`geometry_msgs/msg/Twist`)：`linear.x` 前后、`linear.y` 左右、`angular.z` 偏航；默认收到命令后进入行走，0.5 秒超时后回到平衡站立。
+- `set_standing_height` (`mymit_robot/srv/SetStandingHeight`)：目标高度范围 0.18～0.34 m。
+- `set_control_mode` (`mymit_robot/srv/SetControlMode`)：切换 Passive、JointPd、BalanceStand、Locomotion、StandUp、RecoveryStand 或 FrontJump；`force` 不会绕过原控制器安全检查。
+
+输出接口：
+
+- `state_estimate`、`foot_contacts`：工程自定义状态和接触消息。
+- `joint_states`、`odom`：标准关节状态与里程计。
+- `control_mode`：当前实际 FSM 模式，使用 transient-local QoS。
+- `diagnostics`：控制有效性及仿真估计误差。
+- `/tf`：`odom -> base_link`，其余关节 TF 由 `robot_state_publisher` 发布。
+- `/clock`：MuJoCo 仿真时钟。
+
+常用命令示例：
+
+```bash
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.18, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+
+ros2 service call /set_standing_height mymit_robot/srv/SetStandingHeight \
+  "{height: 0.29}"
+
+# 2 = BalanceStand，3 = Locomotion，6 = FrontJump
+ros2 service call /set_control_mode mymit_robot/srv/SetControlMode \
+  "{mode: 2, force: false}"
+```
+
+原生 MuJoCo UI 仍可用于手动控制。新鲜的 ROS `cmd_vel` 在其超时前优先于 UI 方向按钮；控制算法内部的限幅、状态转换和安全保护保持原样。
+
+## 控制参数表
+
+下文记录当前正式控制链中可人为调整的控制、估计、步态、求解和调度参数。质量、惯量、连杆尺寸、关节限位、额定转矩等机器人固有参数不在此表中。
+
+参数优先级按 `初始化默认值 → 状态内覆盖值 → ROS 参数最终配置值` 排列；同一参数出现多次时，以最右侧、最接近正式入口的值为准。`未覆盖` 表示默认值就是当前生效值，`未启用` 表示代码提供该参数，但当前正式仿真链没有使用它。
 
 ## 1. 正式入口、频率和用户命令
 
 | 文件 | 参数 | 初始化/默认值 | 当前最终值 | 说明 |
 |---|---|---:|---:|---|
-| `mit_robot/src/go1_description/unitree_go1/go1.xml` | MuJoCo `timestep` | XML 未显式设置，MuJoCo默认 `0.002 s` | `0.002 s`（500 Hz） | 物理、状态估计、FSM、WBC和最终关节PD统一周期；测试确认WBC不应降频。 |
+| `mit_robot/src/go1_description/unitree_go1/go1.xml` | MuJoCo `timestep` | XML 未显式设置，MuJoCo默认 `0.002 s` | `0.002 s`（500 Hz） | 物理、状态估计、FSM、WBC和最终关节PD统一周期；WBC保持全频运行以避免支撑约束滞后。 |
 | `mit_robot/include/FSM/ControlFSMData.h` | `control_time_step` | `0.001 s` | 被 `RobotRunner` 覆盖为 `model->opt.timestep = 0.002 s` | 只有不从正式入口构造 FSM 时才会使用 1 ms 默认值。 |
-| `mit_robot/user/main.cpp` | `kStandingHeight` | — | `0.27 m` | 正式入口最终站立高度。 |
-| `mit_robot/user/main.cpp` | `kSlowWalkingForwardSpeed` / `kFastWalkingForwardSpeed` | — | `0.18 / 0.36 m/s` | MuJoCo 的 `Forward slow` 用于崎岖地形稳定行走，`Forward fast` 比原 `0.30 m/s` 适度提速。 |
-| `mit_robot/user/main.cpp` | `kWalkingLateralSpeed` | — | `0.25 m/s` | MuJoCo Left/Right 两个方向开关使用的速度绝对值。 |
-| `mit_robot/user/main.cpp` | `kTurningYawRate` | — | `0.35 rad/s` | MuJoCo Rotate CCW 开关使用的逆时针自转角速度。 |
-| `mit_robot/user/SimulationBridge.hpp` | `standing_height_` / UI 初始值 | `0.27 m` | 被 `main.cpp` 设置为 `0.27 m` | 仿真 UI 与控制器的初始目标。 |
-| `mit_robot/user/SimulationBridge.hpp` | `slow_walking_forward_speed_` / `fast_walking_forward_speed_` | `0.18 / 0.36 m/s` | 被 `main.cpp` 设置为相同值 | 慢档必须低于快档，两档均沿用 MPC 的平滑速度斜坡。 |
+| `mit_robot/src/go1_description/config/mymit_robot.yaml` | `standing_height` | — | `0.27 m` | ROS 2 正式入口和 MuJoCo UI 的初始站立高度。 |
+| 同上 | `slow_walking_speed` / `fast_walking_speed` | — | `0.18 / 0.36 m/s` | UI 慢/快档；ROS 2 可通过 `cmd_vel` 连续给定速度。 |
+| 同上 | `lateral_walking_speed` | — | `0.25 m/s` | MuJoCo Left/Right 两个方向开关使用的速度绝对值。 |
+| 同上 | `turning_yaw_rate` | — | `0.35 rad/s` | MuJoCo Rotate CCW 开关使用的逆时针自转角速度。 |
+| `mit_robot/user/SimulationBridge.hpp` | `standing_height_` / UI 初始值 | `0.27 m` | 被 ROS 参数设置为 `0.27 m` | 仿真 UI 与控制器的初始目标。 |
+| `mit_robot/user/SimulationBridge.hpp` | `slow_walking_forward_speed_` / `fast_walking_forward_speed_` | `0.18 / 0.36 m/s` | 被 ROS 参数设置为相同值 | 慢档必须低于快档，两档均沿用 MPC 的平滑速度斜坡。 |
 | `mit_robot/user/SimulationBridge.hpp` | `walking_backward_speed_` | `0.30 m/s` | 未覆盖 | 后退速度保持拆档前的当前值。 |
-| `mit_robot/user/SimulationBridge.hpp` | `walking_lateral_speed_` | `0.25 m/s` | 被 `main.cpp` 设置为 `0.25 m/s` | 左移为正、右移为负。 |
-| `mit_robot/user/SimulationBridge.hpp` | `turning_yaw_rate_` | `0.35 rad/s` | 被 `main.cpp` 设置为 `0.35 rad/s` | 当前第五个开关执行逆时针自转。 |
+| `mit_robot/user/SimulationBridge.hpp` | `walking_lateral_speed_` | `0.25 m/s` | 被 ROS 参数设置为 `0.25 m/s` | 左移为正、右移为负。 |
+| `mit_robot/user/SimulationBridge.hpp` | `turning_yaw_rate_` | `0.35 rad/s` | 被 ROS 参数设置为 `0.35 rad/s` | 当前第五个开关执行逆时针自转。 |
 | `mit_robot/user/SimulationBridge.hpp` / `.cpp` | 六个运动开关 | 全部关闭 | `Forward slow / Forward fast / Backward / Left / Right / Rotate CCW` 互斥 | 新打开的运动取得控制权；关闭当前运动后切回 BalanceStand。 |
 | `mit_robot/user/SimulationBridge.cpp` | `Jump forward` 按钮 | 未触发 | 单次向前跳 | 仅在稳定的 BalanceStand 中接受；动作结束自动回站立，行走、倾斜或速度过大时拒绝。 |
 | `mit_robot/src/FSM/FSM_State_FrontJump.cpp` | 向前跳阶段时间 | — | `0.18 / 0.18 / 0.17 / 0.25 s` | 顺序为预蹲、水平化蹬伸、空中收腿、带俯仰阻尼的落地缓冲，总时长约 `0.78 s`。 |
 | `mit_robot/src/FSM/FSM_State_FrontJump.cpp` | 蹬伸分配 | — | 前腿 `[0,1.20,-1.25]`，后腿 `[0,1.10,-1.20] rad` | 足端以后扫为主并保留小幅前后腿差异，增加水平冲量同时抵消俯仰力矩。 |
-| `mit_robot/user/StandingHeightIpc.hpp` | 高度最小值 / 最大值 / 默认值 | `0.18 / 0.34 / 0.27 m` | 未覆盖 | 同时约束 ROS 2 服务、IPC 和 MuJoCo 滑块。 |
-| `mit_robot/user/SimulationBridge.cpp` | UI 高度范围 | `0.18～0.34 m` | 未覆盖 | 应与 `StandingHeightIpc.hpp` 保持一致。 |
+| `mit_robot/user/RobotRunner.hpp` | 高度最小值 / 最大值 / 默认值 | `0.18 / 0.34 / 0.27 m` | 未覆盖 | 同时约束 ROS 2 服务、控制器和 MuJoCo 滑块。 |
+| `mit_robot/user/SimulationBridge.cpp` | UI 高度范围 | `0.18～0.34 m` | 未覆盖 | 与 `RobotRunner` 的公开范围保持一致。 |
 | `mit_robot/user/SimulationBridge.cpp` | 物理线程轮询休眠 | `1 ms` | 未覆盖 | 只影响主机调度和 CPU 占用，不改变 MuJoCo 的 2 ms 物理步长。 |
 | `mit_robot/user/SimulationDiagnostics.cpp` | 正式运行诊断输出周期 | `500`帧 | 约`1 s` | 主程序持续统计估计RMS、最大俯仰、最低高度、小腿碰地和控制拒绝帧；只读诊断，不修改控制。 |
 | `mit_robot/user/RobotRunner.hpp` | `defaultWalkingForwardSpeed()` | `0.32 m/s` | UI 慢/快档命令覆盖为入口配置值 | 不经过方向接口时使用。 |
@@ -56,7 +113,7 @@
 | `mit_robot/include/MPC/SolverMPC.h` | `minimum_normal_force` | `0 N` | 未覆盖 | 支撑脚法向力下界。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `maximum_normal_force` | `120 N` | 未覆盖 | MPC 单脚法向力上界。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `force_regularization` | `1e-5` | 未覆盖 | 力正则权重/数值稳定项。 |
-| `mit_robot/include/MPC/SolverMPC.h` | `maximum_iterations` | `75` | 未覆盖 | 从60温和提高，增加25 Hz MPC单次求解余量，不降低500 Hz WBC/电机闭环频率。 |
+| `mit_robot/include/MPC/SolverMPC.h` | `maximum_iterations` | `80` | 未覆盖 | 当前求解迭代上限；不影响500 Hz WBC/电机闭环频率。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `convergence_tolerance` | `1e-5` | 未覆盖 | 无穷范数残差收敛阈值。 |
 | `mit_robot/src/MPC/SolverMPC.cpp` | 状态跟踪权重 | — | `{20,20,10, 2,2,50, 0.2,0.2,0.2, 1,1,2}` | 顺序为 `roll,pitch,yaw,x,y,z,roll_rate,pitch_rate,yaw_rate,vx,vy,vz`。 |
 | `mit_robot/src/MPC/SolverMPC.cpp` | 欧拉角奇异阈值 | — | `1e-4` | `abs(cos(pitch))` 小于该值时拒绝求解。 |
@@ -160,7 +217,7 @@
 
 ## 调参时的生效顺序
 
-1. 入口目标（`user/main.cpp`、UI、ROS 2）先写入 `RobotRunner`。
+1. 入口目标（ROS 参数、话题/服务或 MuJoCo UI）先写入 `RobotRunner`。
 2. `RobotRunner` 的 500 Hz 控制周期运行状态估计、FSM 和 WBC。
 3. Locomotion 状态把 MPC 刷新周期设为 0.04 s，因此求解器以 25 Hz 基础频率刷新；步态仍按独立的 0.05 s 分段推进，接触切换时立即补算。
 4. WBC 头文件里的默认 PD 会被具体 FSM 状态覆盖；调行走必须修改 Locomotion 的最终值，调站立必须修改 BalanceStand 的最终值。

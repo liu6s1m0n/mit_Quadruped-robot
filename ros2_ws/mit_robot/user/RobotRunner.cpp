@@ -111,6 +111,21 @@ void RobotRunner::setControlMode(ControlMode mode) noexcept
   desired_state_.mode = mode;
 }
 
+ControlMode RobotRunner::currentControlMode() const noexcept
+{
+  switch (control_fsm_->currentStateName()) {
+    case FSM_StateName::PASSIVE: return ControlMode::Passive;
+    case FSM_StateName::JOINT_PD: return ControlMode::JointPd;
+    case FSM_StateName::BALANCE_STAND: return ControlMode::BalanceStand;
+    case FSM_StateName::LOCOMOTION: return ControlMode::Locomotion;
+    case FSM_StateName::STAND_UP: return ControlMode::StandUp;
+    case FSM_StateName::RECOVERY_STAND: return ControlMode::RecoveryStand;
+    case FSM_StateName::FRONT_JUMP: return ControlMode::FrontJump;
+    case FSM_StateName::INVALID: return desired_state_.mode;
+  }
+  return desired_state_.mode;
+}
+
 bool RobotRunner::requestFrontJump() noexcept
 {
   constexpr float maximum_tilt = 0.15F;

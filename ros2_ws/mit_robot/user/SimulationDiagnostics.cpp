@@ -119,7 +119,7 @@ void SimulationDiagnostics::observe(
   }
   const Vec3<float> truth_position = bodyPosition(data);
   if (!position_offset_initialized_) {
-    // 足端里程计无法观测绝对水平原点；与测试相同，仅校准一次x/y常量偏移。
+    // 足端里程计无法观测绝对水平原点，因此仅校准一次x/y常量偏移。
     position_offset_ = truth_position - estimate.position_world;
     position_offset_.z() = 0.0F;
     position_offset_initialized_ = true;

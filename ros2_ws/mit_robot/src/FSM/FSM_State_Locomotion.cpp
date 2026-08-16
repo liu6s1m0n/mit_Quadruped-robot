@@ -325,8 +325,8 @@ void FSM_State_Locomotion<T>::LocomotionControlStep()
   }
 
   if (this->_data->use_wbc) {
-    // WBC和最终关节PD均保持500 Hz。测试确认WBC降频会使支撑力和足端约束
-    // 滞后并造成小腿擦地，因此计算削减只放在25 Hz的MPC内部。
+    // WBC和最终关节PD均保持500 Hz，避免支撑力和足端约束滞后造成小腿擦地；
+    // 计算削减只放在25 Hz的MPC内部。
     const bool wbc_valid = wbc_ctrl_->runAndApply(
       &wbc_data_, *this->_data->state_estimate, *this->_data->joint_states,
       *this->_data->leg_controller);

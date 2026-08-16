@@ -92,7 +92,7 @@ bool LinkPosTask<T>::_UpdateTaskJacobian()
   const auto & jacobians = model_->getContactJacobians();
   if (contact_point_index_ >= jacobians.size()) {return false;}
   this->Jt_ = jacobians[contact_point_index_];
-  // 某些测试只希望关节参与足端运动，可选择屏蔽浮动基座的前 6 列。
+  // 固定基座运动学模式下只让关节参与足端运动，可选择屏蔽浮动基座的前6列。
   if (!include_floating_base_) {this->Jt_.leftCols(6).setZero();}
   return this->Jt_.rows() == 3 &&
     this->Jt_.cols() == static_cast<Eigen::Index>(model_->getNumDof()) &&

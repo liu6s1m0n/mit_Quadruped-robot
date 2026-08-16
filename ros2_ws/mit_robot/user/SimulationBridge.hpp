@@ -9,19 +9,25 @@
 
 #include <array>
 #include <atomic>
+#include <memory>
 #include <string>
+
+class RobotMiddlewareInterface;
 
 /** 管理 MuJoCo GUI 与物理对象生命周期，并将其接到 RobotRunner。 */
 class SimulationBridge
 {
 public:
-  explicit SimulationBridge(std::string scene_path);
+  explicit SimulationBridge(
+    std::string scene_path, RobotMiddlewareInterface * middleware = nullptr);
   int run();
   void setStandingHeight(float height);
   /** 设置低速稳定前进档，单位 m/s。 */
   void setSlowWalkingForwardSpeed(float speed);
   /** 设置快速前进档，单位 m/s。 */
   void setFastWalkingForwardSpeed(float speed);
+  /** 设置后退速度的绝对值，单位 m/s。 */
+  void setWalkingBackwardSpeed(float speed);
   /** 设置左右平移速度的绝对值，单位 m/s。 */
   void setWalkingLateralSpeed(float speed);
   /** 设置自转角速度的绝对值，单位 rad/s，正方向为逆时针。 */
@@ -34,6 +40,7 @@ public:
 
 private:
   std::string scene_path_;
+  RobotMiddlewareInterface * middleware_ = nullptr;
   std::atomic<float> standing_height_{0.27F};
   std::atomic<bool> front_jump_requested_{false};
   float slow_walking_forward_speed_ = 0.18F;

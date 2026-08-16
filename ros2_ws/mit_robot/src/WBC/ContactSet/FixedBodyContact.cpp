@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-// 固定基座接触把浮动基座的 6 个速度全部约束为零，主要用于固定机身的测试或调试。
+// 固定基座接触把浮动基座的6个速度全部约束为零，供固定机身运动学和调试使用。
 namespace
 {
 constexpr std::size_t kProjectNumQdot = 18;

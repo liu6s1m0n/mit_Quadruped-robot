@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <!-- ROS 2 包清单：声明构建、运行、接口生成和测试所需依赖，不包含控制参数。 -->
+  <!-- ROS 2 包清单：声明构建、运行和接口生成所需依赖，不包含控制参数。 -->
   <name>mymit_robot</name>
   <version>0.0.0</version>
   <description>GO1 ROS 2 interfaces, robot description, and control framework.</description>
@@ -12,10 +12,16 @@
   <!-- 编译控制程序与生成自定义 msg/srv 所需的依赖。 -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>ament_index_cpp</depend>
+  <depend>diagnostic_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>mujoco_vendor</depend>
+  <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
   <depend>eigen</depend>
 
   <build_depend>rosidl_default_generators</build_depend>
@@ -35,10 +41,6 @@
   <exec_depend>mujoco_ros2_control_plugins</exec_depend>
 
   <member_of_group>rosidl_interface_packages</member_of_group>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
-  <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -7,11 +7,17 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(mujoco_vendor REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -54,7 +60,7 @@ install(DIRECTORY
 )
 
 # Use one MuJoCo ABI for the model library, sensors, tests, and GUI. The local
-# 3.11 installation also provides the Simulate UI used by mymit_robot_user.
+# 3.11 installation also provides the Simulate UI used by mymit_robot_node.
 set(MYMIT_LOCAL_MUJOCO_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/local_mujoco_include")
 file(MAKE_DIRECTORY "${MYMIT_LOCAL_MUJOCO_INCLUDE}")
 if(NOT EXISTS "${MYMIT_LOCAL_MUJOCO_INCLUDE}/mujoco")
@@ -124,28 +130,26 @@ install(TARGETS mymit_robot_model
 ament_export_targets(mymit_robot_model_targets HAS_LIBRARY_TARGET)
 ament_export_libraries(mymit_robot_model)
 
-# MuJoCo GUI application. main only starts SimulationBridge; RobotRunner owns
-# the complete estimator -> FSM -> MPC/WBC -> LegController control pipeline.
-add_executable(mymit_robot_user
-  user/main.cpp
+# MuJoCo backend is loaded locally at runtime to isolate its bundled third-party
+# symbols from ROS 2 middleware. RobotRunner still owns the unchanged pipeline.
+add_library(mymit_robot_simulation_backend SHARED
+  user/SimulationBackend.cpp
   user/RobotRunner.cpp
   user/SimulationDiagnostics.cpp
   user/SimulationBridge.cpp
 )
-target_compile_definitions(mymit_robot_user PRIVATE
-  MYMIT_ROBOT_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
-)
-target_include_directories(mymit_robot_user PRIVATE
+target_compile_features(mymit_robot_simulation_backend PRIVATE cxx_std_17)
+target_include_directories(mymit_robot_simulation_backend PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/user
 )
-target_include_directories(mymit_robot_user BEFORE PRIVATE
+target_include_directories(mymit_robot_simulation_backend BEFORE PRIVATE
   "${MYMIT_LOCAL_MUJOCO_INCLUDE}"
 )
-target_include_directories(mymit_robot_user SYSTEM PRIVATE
+target_include_directories(mymit_robot_simulation_backend SYSTEM PRIVATE
   /usr/local/include/simulate
 )
-target_link_libraries(mymit_robot_user
+target_link_libraries(mymit_robot_simulation_backend
   mymit_robot_model
   Eigen3::Eigen
   /usr/local/lib/libmujoco.so
@@ -154,42 +158,43 @@ target_link_libraries(mymit_robot_user
   dl
   pthread
 )
+
+# ROS executable contains no direct MuJoCo dependency; it talks to the loaded
+# backend through RobotMiddlewareInterface.
+add_executable(mymit_robot_node
+  user/main.cpp
+  user/RobotRosNode.cpp
+)
+target_compile_features(mymit_robot_node PRIVATE cxx_std_17)
+target_include_directories(mymit_robot_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/user
+)
+target_link_libraries(mymit_robot_node Eigen3::Eigen dl pthread)
+add_dependencies(mymit_robot_node mymit_robot_simulation_backend)
+ament_target_dependencies(mymit_robot_node
+  ament_index_cpp
+  diagnostic_msgs
+  geometry_msgs
+  nav_msgs
+  rclcpp
+  rosgraph_msgs
+  sensor_msgs
+  std_msgs
+  tf2_ros
+)
+rosidl_get_typesupport_target(mymit_robot_node_typesupport
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(mymit_robot_node "${mymit_robot_node_typesupport}")
 # libsimulate.a is distributed with GCC LTO objects. Tell GCC to use the
 # available parallelism when materializing those objects; otherwise lto-wrapper
 # falls back to serial LTRANS and emits a warning on every clean link.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_link_options(mymit_robot_user PRIVATE -flto=auto)
+  target_link_options(mymit_robot_simulation_backend PRIVATE -flto=auto)
 endif()
-add_executable(mymit_robot_height_service
-  user/StandingHeightService.cpp
-)
-target_compile_features(mymit_robot_height_service PRIVATE cxx_std_17)
-target_include_directories(mymit_robot_height_service PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/user
-)
-ament_target_dependencies(mymit_robot_height_service rclcpp)
-rosidl_get_typesupport_target(mymit_robot_height_service_typesupport
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(mymit_robot_height_service
-  "${mymit_robot_height_service_typesupport}"
-)
-install(TARGETS mymit_robot_user mymit_robot_height_service
+install(TARGETS mymit_robot_node mymit_robot_simulation_backend
   RUNTIME DESTINATION lib/${PROJECT_NAME}
+  LIBRARY DESTINATION lib
 )
-
-if(BUILD_TESTING)
-  find_package(ament_cmake_gtest REQUIRED)
-  find_package(ament_lint_auto REQUIRED)
-  add_subdirectory(test)
-
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
 
 ament_package()

@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    # ROS API and state publication.
+    use_sim_time: true
+    odom_frame: odom
+    base_frame: base_link
+    publish_rate: 100.0
+    cmd_vel_timeout: 0.5
+    cmd_vel_activates_locomotion: true
+
+    # Existing controller entry values. These are passed to the unchanged
+    # RobotRunner/FSM algorithms at startup.
+    standing_height: 0.27
+    slow_walking_speed: 0.18
+    fast_walking_speed: 0.36
+    backward_walking_speed: 0.30
+    lateral_walking_speed: 0.25
+    turning_yaw_rate: 0.35

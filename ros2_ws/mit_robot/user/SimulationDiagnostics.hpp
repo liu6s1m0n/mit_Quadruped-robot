@@ -2,7 +2,7 @@
  * @file SimulationDiagnostics.hpp
  * @brief 正式仿真运行时诊断：比较控制器估计和MuJoCo真值并监测小腿碰地。
  *
- * 这些能力最初只用于端到端测试，现在同时供正式SimulationBridge和测试复用。
+ * 供正式SimulationBridge持续发布控制器估计误差和接触安全状态。
  * 诊断只读取仿真状态，不修改控制命令或物理状态。
  */
 #ifndef MYMIT_ROBOT_USER_SIMULATION_DIAGNOSTICS_HPP_
@@ -10,28 +10,11 @@
 
 #include <array>
 #include <cstddef>
-#include <limits>
 
 #include <mujoco/mujoco.h>
 
+#include "SimulationTypes.hpp"
 #include "controller/OrientationEstimator.hpp"
-
-struct SimulationDiagnosticReport
-{
-  float maximum_position_error = 0.0F;
-  float maximum_velocity_error = 0.0F;
-  float maximum_orientation_error = 0.0F;
-  float maximum_absolute_pitch = 0.0F;
-  float minimum_height = std::numeric_limits<float>::infinity();
-  std::size_t calf_collision_frames = 0;
-  std::size_t rejected_control_frames = 0;
-  std::size_t observed_frames = 0;
-  double squared_position_error_sum = 0.0;
-  double squared_velocity_error_sum = 0.0;
-
-  float rmsPositionError() const noexcept;
-  float rmsVelocityError() const noexcept;
-};
 
 class SimulationDiagnostics
 {

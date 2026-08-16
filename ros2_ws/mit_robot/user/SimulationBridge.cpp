@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cerrno>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -21,12 +20,9 @@
 #include <simulate.h>
 
 #include <dlfcn.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include "RobotRunner.hpp"
+#include "RobotMiddlewareInterface.hpp"
 #include "SimulationDiagnostics.hpp"
-#include "StandingHeightIpc.hpp"
 
 namespace mj = ::mujoco;
 
@@ -136,69 +132,6 @@ extern "C" mjuiItem * mjui_event(
 namespace
 {
 
-class StandingHeightReceiver
-{
-public:
-  StandingHeightReceiver()
-  : descriptor_(::socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0))
-  {
-    if (descriptor_ < 0) {
-      throw std::runtime_error(
-              std::string("unable to create height-command receiver: ") +
-              std::strerror(errno));
-    }
-    const sockaddr_un address = standing_height_ipc::socketAddress();
-    if (::bind(
-        descriptor_, reinterpret_cast<const sockaddr *>(&address),
-        standing_height_ipc::socketAddressLength()) < 0)
-    {
-      const std::string message = std::string("unable to bind height-command receiver: ") +
-        std::strerror(errno);
-      ::close(descriptor_);
-      descriptor_ = -1;
-      throw std::runtime_error(message);
-    }
-  }
-
-  ~StandingHeightReceiver()
-  {
-    if (descriptor_ >= 0) {::close(descriptor_);}
-  }
-
-  StandingHeightReceiver(const StandingHeightReceiver &) = delete;
-  StandingHeightReceiver & operator=(const StandingHeightReceiver &) = delete;
-
-  void receive(std::atomic<float> & standing_height) const
-  {
-    // 非阻塞地读完队列，只保留最后到达的有效高度；没有数据时立即返回物理循环。
-    standing_height_ipc::Command command;
-    while (true) {
-      const ssize_t received = ::recv(descriptor_, &command, sizeof(command), 0);
-      if (received < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {return;}
-        if (errno == EINTR) {continue;}
-        throw std::runtime_error(
-                std::string("unable to receive height command: ") +
-                std::strerror(errno));
-      }
-      if (received != static_cast<ssize_t>(sizeof(command)) ||
-        command.magic != standing_height_ipc::kCommandMagic ||
-        !std::isfinite(command.height) ||
-        command.height < standing_height_ipc::kMinimumHeight ||
-        command.height > standing_height_ipc::kMaximumHeight)
-      {
-        std::fprintf(stderr, "ignored an invalid standing-height command\n");
-        continue;
-      }
-      standing_height.store(command.height);
-      std::printf("Standing-height target set to %.3f m\n", command.height);
-    }
-  }
-
-private:
-  int descriptor_ = -1;
-};
-
 constexpr std::array<LegId, kNumLegs> kLegOrder{
   LegId::FR, LegId::FL, LegId::RR, LegId::RL};
 constexpr std::array<std::array<const char *, kJointsPerLeg>, kNumLegs>
@@ -260,8 +193,8 @@ float synchronizeStandingHeight(
   // 滑块变化时以 GUI 为准；否则把 ROS 服务写入的原子目标同步回滑块。
   const float slider_value = std::clamp(
     static_cast<float>(slider_height),
-    standing_height_ipc::kMinimumHeight,
-    standing_height_ipc::kMaximumHeight);
+    RobotRunner::minimumStandingHeight(),
+    RobotRunner::maximumStandingHeight());
   if (std::abs(slider_value - previous_slider_height) > 1.0e-6F) {
     requested_height.store(slider_value);
     slider_height = slider_value;
@@ -274,6 +207,53 @@ float synchronizeStandingHeight(
 
   previous_slider_height = static_cast<float>(slider_height);
   return previous_slider_height;
+}
+
+RosContactSnapshot readContacts(const mjModel * model, const mjData * data)
+{
+  RosContactSnapshot result;
+  if (model == nullptr || data == nullptr) {return result;}
+  const int floor = mj_name2id(model, mjOBJ_GEOM, "floor");
+  if (floor < 0) {return result;}
+  std::array<int, kNumLegs> feet{};
+  constexpr std::array<const char *, kNumLegs> names{{"FR", "FL", "RR", "RL"}};
+  for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    feet[leg] = mj_name2id(model, mjOBJ_GEOM, names[leg]);
+    if (feet[leg] < 0) {return result;}
+  }
+  for (int index = 0; index < data->ncon; ++index) {
+    const mjContact & contact = data->contact[index];
+    const int other = contact.geom1 == floor ? contact.geom2 :
+      (contact.geom2 == floor ? contact.geom1 : -1);
+    if (other < 0) {continue;}
+    const auto iterator = std::find(feet.begin(), feet.end(), other);
+    if (iterator == feet.end()) {continue;}
+    const std::size_t leg = static_cast<std::size_t>(iterator - feet.begin());
+    mjtNum force[6]{};
+    mj_contactForce(model, data, index, force);
+    result.contact[leg] = true;
+    result.probability[leg] = 1.0;
+    result.normal_force[leg] += std::abs(static_cast<double>(force[0]));
+  }
+  result.valid = true;
+  return result;
+}
+
+void readJointState(
+  const JointAddresses & addresses, const mjData * data,
+  std::array<double, RobotMiddlewareInterface::kJointCount> & position,
+  std::array<double, RobotMiddlewareInterface::kJointCount> & velocity,
+  std::array<double, RobotMiddlewareInterface::kJointCount> & effort)
+{
+  for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
+    for (std::size_t joint = 0; joint < kJointsPerLeg; ++joint) {
+      const std::size_t index = leg * kJointsPerLeg + joint;
+      const JointAddress & address = addresses[leg][joint];
+      position[index] = data->qpos[address.qpos];
+      velocity[index] = data->qvel[address.dof];
+      effort[index] = data->qfrc_actuator[address.dof];
+    }
+  }
 }
 
 void writeCommands(
@@ -308,6 +288,7 @@ void runPhysics(
   std::array<int, 6> & direction_toggles, float slow_walking_forward_speed,
   float fast_walking_forward_speed, float walking_backward_speed,
   float walking_lateral_speed, float turning_yaw_rate,
+  RobotMiddlewareInterface * middleware,
   std::exception_ptr & failure)
 {
   // 该函数运行在物理线程；渲染线程通过 simulation.mtx 与它共享 mjData。
@@ -332,7 +313,6 @@ void runPhysics(
     const JointAddresses addresses = findJointAddresses(model);
     RobotRunner runner(model, data);
     SimulationDiagnostics diagnostics(model);
-    StandingHeightReceiver height_receiver;
 
     simulation.Load(model, data, scene_path.c_str());
     std::printf(
@@ -348,7 +328,12 @@ void runPhysics(
     float previous_slider_height = standing_height.load();
     std::array<int, 6> previous_direction_toggles{};
     int previous_direction = -2;
+    bool ros_velocity_was_active = false;
     while (!simulation.exitrequest.load()) {
+      if (middleware != nullptr && !middleware->middlewareOk()) {
+        simulation.exitrequest.store(1);
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       std::unique_lock<std::recursive_mutex> lock(simulation.mtx);
       // MuJoCo Reset 会让仿真时间回退，据此重置估计器和 FSM 内部历史。
@@ -365,7 +350,12 @@ void runPhysics(
           "MuJoCo reset detected: robot and controller restored to home posture\n");
       }
       previous_simulation_time = data->time;
-      height_receiver.receive(standing_height);
+      if (middleware != nullptr) {
+        float requested_height = 0.0F;
+        if (middleware->takeStandingHeight(requested_height)) {
+          standing_height.store(requested_height);
+        }
+      }
       const float commanded_height = synchronizeStandingHeight(
         standing_height_slider, previous_slider_height, standing_height);
       // 六个运动开关互斥：新打开的开关取得控制权，关闭当前开关则回到站立。
@@ -394,7 +384,26 @@ void runPhysics(
       }
       previous_direction_toggles = direction_toggles;
 
-      if (requested_direction != previous_direction) {
+      const RosVelocityCommand ros_velocity = middleware == nullptr ?
+        RosVelocityCommand{} : middleware->velocityCommand();
+      if (ros_velocity.active) {
+        runner.setLocomotionVelocityCommand(
+          ros_velocity.forward, ros_velocity.lateral, ros_velocity.yaw_rate);
+        if (middleware->cmdVelActivatesLocomotion() && !ros_velocity_was_active) {
+          runner.setControlMode(ControlMode::Locomotion);
+        }
+        ros_velocity_was_active = true;
+      } else if (ros_velocity_was_active) {
+        runner.setLocomotionVelocityCommand(0.0F, 0.0F, 0.0F);
+        if (middleware->cmdVelActivatesLocomotion()) {
+          runner.setControlMode(ControlMode::BalanceStand);
+        }
+        ros_velocity_was_active = false;
+        previous_direction = -2;
+      }
+
+      // A fresh ROS velocity command has priority over native UI direction toggles.
+      if (!ros_velocity_was_active && requested_direction != previous_direction) {
         float forward_velocity = 0.0F;
         float lateral_velocity = 0.0F;
         float yaw_rate = 0.0F;
@@ -438,10 +447,23 @@ void runPhysics(
         std::printf("Robot direction set to %s\n", direction_name);
         previous_direction = requested_direction;
       }
+      if (middleware != nullptr) {
+        const std::optional<ControlMode> requested_mode =
+          middleware->takeControlModeRequest();
+        if (requested_mode.has_value()) {
+          if (*requested_mode == ControlMode::FrontJump) {
+            front_jump_requested.store(true);
+          } else {
+            runner.setControlMode(*requested_mode);
+          }
+        }
+      }
       if (simulation.run) {
         if (front_jump_requested.exchange(false)) {
           if (runner.requestFrontJump()) {
-            for (int & toggle : direction_toggles) {toggle = 0;}
+            for (int & toggle : direction_toggles) {
+              toggle = 0;
+            }
             previous_direction_toggles = direction_toggles;
             previous_direction = -1;
             diagnostics.reset();
@@ -466,6 +488,19 @@ void runPhysics(
         }
         diagnostics.observe(data, runner.stateEstimate(), control_valid);
         const auto & diagnostic_report = diagnostics.report();
+        if (middleware != nullptr) {
+          std::array<double, RobotMiddlewareInterface::kJointCount> joint_position{};
+          std::array<double, RobotMiddlewareInterface::kJointCount> joint_velocity{};
+          std::array<double, RobotMiddlewareInterface::kJointCount> joint_effort{};
+          readJointState(
+            addresses, data, joint_position, joint_velocity, joint_effort);
+          middleware->setCurrentMode(runner.currentControlMode());
+          middleware->publishClock(data->time);
+          middleware->publishState(
+            data->time, runner.stateEstimate(), joint_position, joint_velocity,
+            joint_effort, readContacts(model, data), diagnostic_report,
+            control_valid);
+        }
         if (diagnostic_report.observed_frames != 0 &&
           diagnostic_report.observed_frames % 500 == 0)
         {
@@ -499,20 +534,29 @@ void runPhysics(
 
 }  // namespace
 
-SimulationBridge::SimulationBridge(std::string scene_path)
-: scene_path_(std::move(scene_path))
+SimulationBridge::SimulationBridge(
+  std::string scene_path, RobotMiddlewareInterface * middleware)
+: scene_path_(std::move(scene_path)), middleware_(middleware)
 {
   if (scene_path_.empty()) {throw std::invalid_argument("scene path must not be empty");}
 }
 
 void SimulationBridge::setStandingHeight(float height)
 {
-  if (!std::isfinite(height) || height < standing_height_ipc::kMinimumHeight ||
-    height > standing_height_ipc::kMaximumHeight)
+  if (!std::isfinite(height) || height < RobotRunner::minimumStandingHeight() ||
+    height > RobotRunner::maximumStandingHeight())
   {
     throw std::invalid_argument("standing height must be within [0.18, 0.34] m");
   }
   standing_height_.store(height);
+}
+
+void SimulationBridge::setWalkingBackwardSpeed(float speed)
+{
+  if (!std::isfinite(speed) || speed < 0.0F || speed > 0.6F) {
+    throw std::invalid_argument("backward speed must be within [0, 0.6] m/s");
+  }
+  walking_backward_speed_ = speed;
 }
 
 void SimulationBridge::setSlowWalkingForwardSpeed(float speed)
@@ -577,7 +621,7 @@ int SimulationBridge::run()
     std::ref(front_jump_requested_),
     std::ref(direction_toggles_), slow_walking_forward_speed_,
     fast_walking_forward_speed_, walking_backward_speed_, walking_lateral_speed_,
-    turning_yaw_rate_, std::ref(failure));
+    turning_yaw_rate_, middleware_, std::ref(failure));
   simulation->RenderLoop();
   physics.join();
   g_standing_height_slider = nullptr;
