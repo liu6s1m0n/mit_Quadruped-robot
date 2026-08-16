@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+// 验证摆动腿目标在摆动期间保持锁存，并在触地后切换回支撑状态。
+
 #include "FSM/FSM_State_Locomotion.h"
 #include "controller/FootSwingTrajectory.hpp"
 #include "fsm_test_support.hpp"
@@ -9,6 +11,7 @@ namespace
 
 TEST(LocomotionStateTest, LatchesSwingEndpointsUntilTouchdown)
 {
+  // 使用较大的测试步长，便于在少量周期内观察摆动和落脚阶段。
   test_support::FsmContext context(0.05F);
   ASSERT_TRUE(context.initialized);
   context.desired.mode = ControlMode::Locomotion;
@@ -29,6 +32,8 @@ TEST(LocomotionStateTest, LatchesSwingEndpointsUntilTouchdown)
 
   context.leg_controller.datas[kRearRight].p.z() += 0.04F;
   locomotion.run();
+
+  // 根据当前腿部反馈复现期望落点，检查控制器生成的 Bezier 轨迹。
 
   FootSwingTrajectory<float> expected;
   expected.setInitialPosition(initial);

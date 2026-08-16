@@ -66,9 +66,8 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
   estimator_parameters.maximum_time_step = std::max(
     estimator_parameters.maximum_time_step,
     estimator_parameters.nominal_time_step);
-  /*表示仿真中可以直接使用 MuJoCo 真值姿态。
-    真实机器人则通常需要使用：IMU 积分；
-    互补滤波；EKF；接触约束估计。*/
+  /*软件仿真模式：传感器数据由 MuJoCo 提供，姿态直接采用 MuJoCo
+    输出的机身四元数真值，不经过真机使用的 IMU 融合链路。*/
   state_estimator_ = std::make_unique<PositionVelocityEstimator<float>>(
     quadruped_, *imu_, leg_sensor_pointers_,
     OrientationEstimatorMode::SIMULATION_TRUTH, estimator_parameters);
@@ -110,6 +109,27 @@ void RobotRunner::setControlMode(ControlMode mode) noexcept
   desired_state_.body_acceleration_world.setZero();
   desired_state_.body_angular_velocity.setZero();
   desired_state_.mode = mode;
+}
+
+bool RobotRunner::requestFrontJump() noexcept
+{
+  constexpr float maximum_tilt = 0.15F;
+  constexpr float maximum_linear_speed = 0.12F;
+  constexpr float maximum_angular_speed = 0.35F;
+  if (!jointInitializationComplete() || !state_estimate_.valid ||
+    control_fsm_->currentStateName() != FSM_StateName::BALANCE_STAND ||
+    std::abs(state_estimate_.rpy.x()) > maximum_tilt ||
+    std::abs(state_estimate_.rpy.y()) > maximum_tilt ||
+    state_estimate_.velocity_world.norm() > maximum_linear_speed ||
+    state_estimate_.angular_velocity_body.norm() > maximum_angular_speed)
+  {
+    return false;
+  }
+  desired_state_.body_velocity_world.setZero();
+  desired_state_.body_acceleration_world.setZero();
+  desired_state_.body_angular_velocity.setZero();
+  desired_state_.mode = ControlMode::FrontJump;
+  return true;
 }
 
 /*把速度传递给 FSM 内部的 Locomotion*/

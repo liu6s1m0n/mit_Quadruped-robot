@@ -75,7 +75,7 @@ private:
   /*参数1：摆动腿抬脚高度。保持 0.10 m，不再用增加高度间接提高速度。*/
   T swing_height_ = T(0.10);
   /*参数2：单个步周期内最大水平步长为 18 cm。 -> 0.20*/
-  T maximum_step_length_ = T(0.20);
+  T maximum_step_length_ = T(0.15);
   /*只提高摆动腿的关节速度前馈：Hip保持原速以稳定支撑宽度，
     thigh/calf提高50%；最终仍按GO1关节速度上限裁剪。*/
   Vec3<T> swing_joint_velocity_scale_ =

@@ -236,6 +236,11 @@ FSM_StateName FSM_State_RecoveryStand<T>::checkTransition()
     case ControlMode::RecoveryStand:
       this->nextStateName = this->stateName;
       break;
+    case ControlMode::FrontJump:
+      // 恢复动作优先，拒绝在姿态未恢复时起跳。
+      this->_data->desired_state->mode = ControlMode::RecoveryStand;
+      this->nextStateName = this->stateName;
+      break;
   }
   this->transitionDuration = T(0);
   return this->nextStateName;

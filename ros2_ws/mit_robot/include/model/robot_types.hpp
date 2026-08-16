@@ -79,7 +79,8 @@ enum class ControlMode : std::uint8_t
   BalanceStand = 2,
   Locomotion = 3,
   StandUp = 4,
-  RecoveryStand = 5
+  RecoveryStand = 5,
+  FrontJump = 6
 };
 
 /**
@@ -97,9 +98,17 @@ struct ImuData
 
   Eigen::Quaternion<T> orientation_world_from_body{T(1), T(0), T(0), T(0)};
   Vec3<T> angular_velocity_body = Vec3<T>::Zero();  ///< rad/s
-  Vec3<T> acceleration_body = Vec3<T>::Zero();      ///< m/s^2
+  Vec3<T> acceleration_body = Vec3<T>::Zero();      ///< 线加速度/比力，m/s^2
+  Vec3<T> angular_acceleration_body = Vec3<T>::Zero();  ///< 角加速度，rad/s^2
   T timestamp = 0.0;  ///< 单调时钟时间，单位 s。
-  bool valid = false;      ///< false 时状态估计器必须丢弃本次采样。
+  /** false 表示设备只提供陀螺仪/加速度计，融合器需从重力方向初始化姿态。 */
+  bool orientation_valid = false;
+  /** false 表示没有线加速度；位置速度估计器退化为常速度预测。 */
+  bool acceleration_valid = true;
+  /** true 表示 angular_acceleration_body 来自硬件有效测量。 */
+  bool angular_acceleration_valid = false;
+  /** false 时整帧 IMU 数据无效；它与 orientation_valid 分开判断。 */
+  bool valid = false;
 };
 
 /**
@@ -185,6 +194,9 @@ struct StateEstimate
   Vec3<T> angular_velocity_body = Vec3<T>::Zero();  ///< rad/s
   Vec3<T> acceleration_body = Vec3<T>::Zero();   ///< m/s^2
   Vec3<T> acceleration_world = Vec3<T>::Zero();  ///< m/s^2
+  Vec3<T> angular_acceleration_body = Vec3<T>::Zero();  ///< rad/s^2
+  bool acceleration_valid = true;
+  bool angular_acceleration_valid = false;
   T timestamp = 0.0;
   bool valid = false;
 };

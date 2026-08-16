@@ -1,5 +1,7 @@
 #pragma once
 
+// 提供 FSM 单元测试共用的机器人模型、传感器反馈、期望状态和调度器。
+
 #include <array>
 #include <cstddef>
 
@@ -17,6 +19,7 @@ struct FsmContext
     gait_scheduler(time_step),
     control_time_step(time_step)
   {
+    // 用 GO1 默认姿态初始化四条腿，并让腿控制器先接收一帧有效反馈。
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
       joints[leg].leg = static_cast<LegId>(leg);
       joints[leg].position = quadruped.leg(joints[leg].leg).joints.home_position;
@@ -31,6 +34,7 @@ struct FsmContext
 
   ControlFSMData<float> data()
   {
+    // FSM 只借用这些对象，因此返回的控制数据保存的是非拥有指针。
     ControlFSMData<float> result;
     result.quadruped = &quadruped;
     result.state_estimate = &estimate;

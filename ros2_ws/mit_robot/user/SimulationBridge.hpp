@@ -18,25 +18,31 @@ public:
   explicit SimulationBridge(std::string scene_path);
   int run();
   void setStandingHeight(float height);
-  /** 设置进入 Locomotion 后使用的固定前进速度，单位 m/s。 */
-  void setWalkingForwardSpeed(float speed);
+  /** 设置低速稳定前进档，单位 m/s。 */
+  void setSlowWalkingForwardSpeed(float speed);
+  /** 设置快速前进档，单位 m/s。 */
+  void setFastWalkingForwardSpeed(float speed);
   /** 设置左右平移速度的绝对值，单位 m/s。 */
   void setWalkingLateralSpeed(float speed);
   /** 设置自转角速度的绝对值，单位 rad/s，正方向为逆时针。 */
   void setTurningYawRate(float yaw_rate);
   float standingHeight() const noexcept {return standing_height_.load();}
-  float walkingForwardSpeed() const noexcept {return walking_forward_speed_;}
+  float slowWalkingForwardSpeed() const noexcept {return slow_walking_forward_speed_;}
+  float fastWalkingForwardSpeed() const noexcept {return fast_walking_forward_speed_;}
   float walkingLateralSpeed() const noexcept {return walking_lateral_speed_;}
   float turningYawRate() const noexcept {return turning_yaw_rate_;}
 
 private:
   std::string scene_path_;
   std::atomic<float> standing_height_{0.27F};
-  float walking_forward_speed_ = 0.32F;
+  std::atomic<bool> front_jump_requested_{false};
+  float slow_walking_forward_speed_ = 0.18F;
+  float fast_walking_forward_speed_ = 0.36F;
+  float walking_backward_speed_ = 0.30F;
   float walking_lateral_speed_ = 0.25F;
   float turning_yaw_rate_ = 0.35F;
   double standing_height_slider_ = 0.27;
-  std::array<int, 5> direction_toggles_{};
+  std::array<int, 6> direction_toggles_{};
 };
 
 #endif  // MYMIT_ROBOT_USER_SIMULATION_BRIDGE_HPP_

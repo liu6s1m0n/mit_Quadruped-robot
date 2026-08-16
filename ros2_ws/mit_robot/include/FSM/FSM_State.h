@@ -21,7 +21,8 @@ enum class FSM_StateName
   STAND_UP,
   RECOVERY_STAND,
   BALANCE_STAND,
-  LOCOMOTION
+  LOCOMOTION,
+  FRONT_JUMP
 };
 
 template < typename T >

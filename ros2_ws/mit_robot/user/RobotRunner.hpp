@@ -38,6 +38,8 @@ public:
   /** 仿真 Reset 后清空控制器内部历史，但不会改写 MuJoCo 的物理状态。 */
   void reset();
   void setControlMode(ControlMode mode) noexcept;
+  /** 稳定站立时请求执行一次向前跳；条件不满足时返回 false。 */
+  bool requestFrontJump() noexcept;
   /** 将前进速度透传给 ControlFSM 内的 Locomotion/MPC，单位 m/s。 */
   void setWalkingForwardSpeed(float speed);
   /** 设置机身系前后、左右速度和偏航角速度，单位 m/s、rad/s。 */

@@ -17,6 +17,7 @@ FSM_StateName stateForMode(ControlMode mode) noexcept
     case ControlMode::Locomotion: return FSM_StateName::LOCOMOTION;
     case ControlMode::StandUp: return FSM_StateName::STAND_UP;
     case ControlMode::RecoveryStand: return FSM_StateName::RECOVERY_STAND;
+    case ControlMode::FrontJump: return FSM_StateName::FRONT_JUMP;
   }
   return FSM_StateName::INVALID;
 }
@@ -94,6 +95,7 @@ ControlFSM<T>::ControlFSM(
   statesList.recovery_stand = std::make_unique<FSM_State_RecoveryStand<T>>(&data);
   statesList.balance_stand = std::make_unique<FSM_State_BalanceStand<T>>(&data);
   statesList.locomotion = std::make_unique<FSM_State_Locomotion<T>>(&data);
+  statesList.front_jump = std::make_unique<FSM_State_FrontJump<T>>(&data);
   safety_checker_ = std::make_unique<SafetyChecker<T>>(&data);
   initialize();
 }
@@ -223,6 +225,7 @@ FSM_State<T> * ControlFSM<T>::getNextState(FSM_StateName state_name) noexcept
     case FSM_StateName::RECOVERY_STAND: return statesList.recovery_stand.get();
     case FSM_StateName::BALANCE_STAND: return statesList.balance_stand.get();
     case FSM_StateName::LOCOMOTION: return statesList.locomotion.get();
+    case FSM_StateName::FRONT_JUMP: return statesList.front_jump.get();
     case FSM_StateName::INVALID: return nullptr;
   }
   return nullptr;

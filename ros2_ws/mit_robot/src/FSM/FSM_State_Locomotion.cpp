@@ -18,15 +18,17 @@ FSM_State_Locomotion<T>::FSM_State_Locomotion(
   if (control_fsm_data == nullptr || !control_fsm_data->valid()) {
     throw std::invalid_argument("locomotion state requires valid FSM data");
   }
-  // MPC 的 10 段 TROT 必须与 GaitScheduler 的 0.5 s 周期一致，因此每段为
-  // 50 ms   参数round(T(0.05)。两套接触时序若周期不同，状态估计器会逐渐把摆动脚误当支撑脚。
-  //这里计算 MPC 的时间间隔。
+  // 优化以 25 Hz 刷新；MPC 的 10 段 TROT 仍按每段 50 ms 推进，从而与
+  // GaitScheduler 的 0.5 s 周期一致。两个间隔必须分开，否则提高求解频率
+  // 会意外加快步态并使状态估计器误判支撑脚。
   const std::size_t mpc_interval = static_cast<std::size_t>(std::max(
+      T(1), std::round(T(0.04) / control_fsm_data->control_time_step)));
+  const std::size_t gait_segment_interval = static_cast<std::size_t>(std::max(
       T(1), std::round(T(0.05) / control_fsm_data->control_time_step)));
   //创建 MPC 控制器。传入:机器人模型；控制周期；MPC 步态时间间隔。  
   mpc_ = std::make_unique<mpc::ConvexMPCLocomotion<T>>(
     *control_fsm_data->quadruped, control_fsm_data->control_time_step,
-    mpc_interval);
+    mpc_interval, mpc::SolverSettings<T>{}, gait_segment_interval);
   //创建 WBC。buildFloatingBaseModel() 会建立一个带浮动基座的机器人动力学模型。
   //浮动基座表示机身不是固定在地面上，而是有：3 个平移自由度 + 3 个旋转自由度
   wbc_ctrl_ = std::make_unique<LocomotionCtrl<T>>(
@@ -122,6 +124,12 @@ FSM_StateName FSM_State_Locomotion<T>::checkTransition()
       break;
     case ControlMode::RecoveryStand:
       this->nextStateName = FSM_StateName::RECOVERY_STAND;
+      this->transitionDuration = T(0);
+      break;
+    case ControlMode::FrontJump:
+      // 跳跃只能从稳定站立触发；行走中收到请求时先回到站立。
+      this->_data->desired_state->mode = ControlMode::BalanceStand;
+      this->nextStateName = FSM_StateName::BALANCE_STAND;
       this->transitionDuration = T(0);
       break;
   }
@@ -318,7 +326,7 @@ void FSM_State_Locomotion<T>::LocomotionControlStep()
 
   if (this->_data->use_wbc) {
     // WBC和最终关节PD均保持500 Hz。测试确认WBC降频会使支撑力和足端约束
-    // 滞后并造成小腿擦地，因此计算削减只放在20 Hz的MPC内部。
+    // 滞后并造成小腿擦地，因此计算削减只放在25 Hz的MPC内部。
     const bool wbc_valid = wbc_ctrl_->runAndApply(
       &wbc_data_, *this->_data->state_estimate, *this->_data->joint_states,
       *this->_data->leg_controller);

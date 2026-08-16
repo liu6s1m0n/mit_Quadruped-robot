@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+// 验证控制 FSM 的状态切换、命令接口注册以及安全检查触发后的急停行为。
+
 #include <cstdint>
 
 #include "FSM/ControlFSM.h"
@@ -10,6 +12,7 @@ namespace
 
 TEST(ControlFSMTest, TransitionsBetweenProjectControlModes)
 {
+  // 使用固定控制周期构造完整测试上下文，覆盖项目支持的主要工作模式。
   test_support::FsmContext context(0.01F);
   ASSERT_TRUE(context.initialized);
   ControlFSM<float> fsm(
@@ -22,6 +25,7 @@ TEST(ControlFSMTest, TransitionsBetweenProjectControlModes)
   EXPECT_EQ(static_cast<std::uint8_t>(ControlMode::Locomotion), 3);
   EXPECT_EQ(static_cast<std::uint8_t>(ControlMode::StandUp), 4);
   EXPECT_EQ(static_cast<std::uint8_t>(ControlMode::RecoveryStand), 5);
+  EXPECT_EQ(static_cast<std::uint8_t>(ControlMode::FrontJump), 6);
 
   EXPECT_EQ(fsm.currentStateName(), FSM_StateName::PASSIVE);
   context.desired.mode = ControlMode::JointPd;
@@ -59,6 +63,7 @@ TEST(ControlFSMTest, TransitionsBetweenProjectControlModes)
 
 TEST(ControlFSMTest, RegisteredSafetyCheckerStopsUnsafeBalanceOrientation)
 {
+  // 姿态超过安全阈值后，FSM 应切换到被动状态并禁用腿部输出。
   test_support::FsmContext context(0.001F);
   ASSERT_TRUE(context.initialized);
   context.desired.mode = ControlMode::BalanceStand;

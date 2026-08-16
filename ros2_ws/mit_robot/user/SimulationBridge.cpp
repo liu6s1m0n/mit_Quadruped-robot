@@ -34,16 +34,19 @@ namespace
 {
 
 using MjuiAddFunction = void (*)(mjUI *, const mjuiDef *);
+using MjuiEventFunction = mjuiItem * (*)(mjUI *, mjuiState *, const mjrContext *);
 double * g_standing_height_slider = nullptr;
-std::array<int, 5> * g_direction_toggles = nullptr;
+std::array<int, 6> * g_direction_toggles = nullptr;
+std::atomic<bool> * g_front_jump_requested = nullptr;
 
 enum DirectionIndex : std::size_t
 {
-  kForward = 0,
-  kBackward = 1,
-  kLeft = 2,
-  kRight = 3,
-  kRotate = 4
+  kForwardSlow = 0,
+  kForwardFast = 1,
+  kBackward = 2,
+  kLeft = 3,
+  kRight = 4,
+  kRotate = 5
 };
 
 MjuiAddFunction originalMjuiAdd()
@@ -52,6 +55,18 @@ MjuiAddFunction originalMjuiAdd()
   static const MjuiAddFunction function = []() {
       void * symbol = ::dlsym(RTLD_NEXT, "mjui_add");
       MjuiAddFunction result = nullptr;
+      static_assert(sizeof(result) == sizeof(symbol));
+      std::memcpy(&result, &symbol, sizeof(result));
+      return result;
+    }();
+  return function;
+}
+
+MjuiEventFunction originalMjuiEvent()
+{
+  static const MjuiEventFunction function = []() {
+      void * symbol = ::dlsym(RTLD_NEXT, "mjui_event");
+      MjuiEventFunction result = nullptr;
       static_assert(sizeof(result) == sizeof(symbol));
       std::memcpy(&result, &symbol, sizeof(result));
       return result;
@@ -86,14 +101,36 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
       mjITEM_SLIDERNUM, "Height (m)", 2,
       g_standing_height_slider, "0.18 0.34", 0
     },
-    {mjITEM_CHECKINT, "Forward", 2, &(*g_direction_toggles)[kForward], "", 0},
+    {mjITEM_CHECKINT, "Forward slow", 2, &(*g_direction_toggles)[kForwardSlow], "", 0},
+    {mjITEM_CHECKINT, "Forward fast", 2, &(*g_direction_toggles)[kForwardFast], "", 0},
     {mjITEM_CHECKINT, "Backward", 2, &(*g_direction_toggles)[kBackward], "", 0},
     {mjITEM_CHECKINT, "Left", 2, &(*g_direction_toggles)[kLeft], "", 0},
     {mjITEM_CHECKINT, "Right", 2, &(*g_direction_toggles)[kRight], "", 0},
     {mjITEM_CHECKINT, "Rotate CCW", 2, &(*g_direction_toggles)[kRotate], "", 0},
+    {mjITEM_BUTTON, "Jump forward", 2, nullptr, "", 0},
     {mjITEM_END, "", 0, nullptr, "", 0}
   };
   add(ui, height_controls);
+}
+
+// Simulate consumes button events internally, so intercept the returned item
+// and hand a lock-free one-shot request to the physics thread.
+extern "C" mjuiItem * mjui_event(
+  mjUI * ui, mjuiState * state, const mjrContext * context)
+{
+  const MjuiEventFunction event = originalMjuiEvent();
+  if (event == nullptr) {
+    std::fprintf(stderr, "unable to resolve MuJoCo mjui_event\n");
+    std::abort();
+  }
+  mjuiItem * changed = event(ui, state, context);
+  if (changed != nullptr && changed->type == mjITEM_BUTTON &&
+    std::strcmp(changed->name, "Jump forward") == 0 &&
+    g_front_jump_requested != nullptr)
+  {
+    g_front_jump_requested->store(true);
+  }
+  return changed;
 }
 
 namespace
@@ -267,7 +304,9 @@ void writeCommands(
 void runPhysics(
   mj::Simulate & simulation, const std::string & scene_path,
   std::atomic<float> & standing_height, double & standing_height_slider,
-  std::array<int, 5> & direction_toggles, float walking_forward_speed,
+  std::atomic<bool> & front_jump_requested,
+  std::array<int, 6> & direction_toggles, float slow_walking_forward_speed,
+  float fast_walking_forward_speed, float walking_backward_speed,
   float walking_lateral_speed, float turning_yaw_rate,
   std::exception_ptr & failure)
 {
@@ -297,17 +336,17 @@ void runPhysics(
 
     simulation.Load(model, data, scene_path.c_str());
     std::printf(
-      "MuJoCo GO1 control started: dt=%.4f s, forward=%.2f m/s, "
-      "lateral=%.2f m/s, turning=%.2f rad/s, "
+      "MuJoCo GO1 control started: dt=%.4f s, slow/fast=%.2f/%.2f m/s, "
+      "backward=%.2f m/s, lateral=%.2f m/s, turning=%.2f rad/s, "
       "default mode=BalanceStand/WBC\n",
-      model->opt.timestep, walking_forward_speed, walking_lateral_speed,
-      turning_yaw_rate);
+      model->opt.timestep, slow_walking_forward_speed, fast_walking_forward_speed,
+      walking_backward_speed, walking_lateral_speed, turning_yaw_rate);
 
     bool controller_ready = false;
     std::size_t consecutive_failures = 0;
     double previous_simulation_time = data->time;
     float previous_slider_height = standing_height.load();
-    std::array<int, 5> previous_direction_toggles{};
+    std::array<int, 6> previous_direction_toggles{};
     int previous_direction = -2;
     while (!simulation.exitrequest.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -329,7 +368,7 @@ void runPhysics(
       height_receiver.receive(standing_height);
       const float commanded_height = synchronizeStandingHeight(
         standing_height_slider, previous_slider_height, standing_height);
-      // 五个方向开关互斥：新打开的开关取得控制权，关闭当前开关则回到站立。
+      // 六个运动开关互斥：新打开的开关取得控制权，关闭当前开关则回到站立。
       int requested_direction = -1;
       for (std::size_t index = 0; index < direction_toggles.size(); ++index) {
         direction_toggles[index] = direction_toggles[index] == 0 ? 0 : 1;
@@ -361,12 +400,16 @@ void runPhysics(
         float yaw_rate = 0.0F;
         const char * direction_name = "Stand";
         switch (requested_direction) {
-          case kForward:
-            forward_velocity = walking_forward_speed;
-            direction_name = "Forward";
+          case kForwardSlow:
+            forward_velocity = slow_walking_forward_speed;
+            direction_name = "Forward slow";
+            break;
+          case kForwardFast:
+            forward_velocity = fast_walking_forward_speed;
+            direction_name = "Forward fast";
             break;
           case kBackward:
-            forward_velocity = -walking_forward_speed;
+            forward_velocity = -walking_backward_speed;
             direction_name = "Backward";
             break;
           case kLeft:
@@ -396,6 +439,17 @@ void runPhysics(
         previous_direction = requested_direction;
       }
       if (simulation.run) {
+        if (front_jump_requested.exchange(false)) {
+          if (runner.requestFrontJump()) {
+            for (int & toggle : direction_toggles) {toggle = 0;}
+            previous_direction_toggles = direction_toggles;
+            previous_direction = -1;
+            diagnostics.reset();
+            std::printf("Front jump accepted\n");
+          } else {
+            std::printf("Front jump ignored: robot must be stable in BalanceStand\n");
+          }
+        }
         // 控制计算使用当前传感器状态，随后写力矩，最后推进一个物理时间步。
         runner.setStandingHeight(commanded_height);
         const bool control_valid = runner.run();
@@ -461,12 +515,20 @@ void SimulationBridge::setStandingHeight(float height)
   standing_height_.store(height);
 }
 
-void SimulationBridge::setWalkingForwardSpeed(float speed)
+void SimulationBridge::setSlowWalkingForwardSpeed(float speed)
 {
-  if (!std::isfinite(speed) || std::abs(speed) > 0.6F) {
-    throw std::invalid_argument("walking speed must be within [-0.6, 0.6] m/s");
+  if (!std::isfinite(speed) || speed <= 0.0F || speed > 0.6F) {
+    throw std::invalid_argument("slow walking speed must be within (0, 0.6] m/s");
   }
-  walking_forward_speed_ = speed;
+  slow_walking_forward_speed_ = speed;
+}
+
+void SimulationBridge::setFastWalkingForwardSpeed(float speed)
+{
+  if (!std::isfinite(speed) || speed <= 0.0F || speed > 0.6F) {
+    throw std::invalid_argument("fast walking speed must be within (0, 0.6] m/s");
+  }
+  fast_walking_forward_speed_ = speed;
 }
 
 void SimulationBridge::setWalkingLateralSpeed(float speed)
@@ -490,6 +552,9 @@ int SimulationBridge::run()
   if (mjVERSION_HEADER != mj_version()) {
     throw std::runtime_error("MuJoCo headers and runtime library versions differ");
   }
+  if (slow_walking_forward_speed_ >= fast_walking_forward_speed_) {
+    throw std::runtime_error("slow walking speed must be lower than fast walking speed");
+  }
 
   mjvCamera camera;
   mjv_defaultCamera(&camera);
@@ -500,6 +565,7 @@ int SimulationBridge::run()
   auto glfw_adapter = std::make_unique<mj::GlfwAdapter>();
   g_standing_height_slider = &standing_height_slider_;
   g_direction_toggles = &direction_toggles_;
+  g_front_jump_requested = &front_jump_requested_;
   auto simulation = std::make_unique<mj::Simulate>(
     std::move(glfw_adapter), &camera, &options, &perturbation, false);
   simulation->run = true;
@@ -508,12 +574,15 @@ int SimulationBridge::run()
   std::thread physics(
     runPhysics, std::ref(*simulation), std::cref(scene_path_),
     std::ref(standing_height_), std::ref(standing_height_slider_),
-    std::ref(direction_toggles_), walking_forward_speed_, walking_lateral_speed_,
+    std::ref(front_jump_requested_),
+    std::ref(direction_toggles_), slow_walking_forward_speed_,
+    fast_walking_forward_speed_, walking_backward_speed_, walking_lateral_speed_,
     turning_yaw_rate_, std::ref(failure));
   simulation->RenderLoop();
   physics.join();
   g_standing_height_slider = nullptr;
   g_direction_toggles = nullptr;
+  g_front_jump_requested = nullptr;
   if (failure != nullptr) {std::rethrow_exception(failure);}
   return 0;
 }

@@ -268,3 +268,57 @@ TEST(SimulationEstimationConsistency, ExecutesAllFiveMujocoDirectionCommands)
   EXPECT_GT(minimum_height, 0.20F);
   EXPECT_LE(rejected_frames, 2);
 }
+
+TEST(SimulationEstimationConsistency, ExecutesOneShotForwardJump)
+{
+  auto model = loadModel();
+  DataPointer data(mj_makeData(model.get()), &mj_deleteData);
+  ASSERT_NE(data, nullptr);
+  const int home = namedId(model.get(), mjOBJ_KEY, "home");
+  mj_resetDataKeyframe(model.get(), data.get(), home);
+  mj_forward(model.get(), data.get());
+
+  RobotRunner runner(model.get(), data.get());
+  SimulationDiagnostics diagnostics(model.get());
+  const JointAddresses addresses = jointAddresses(model.get());
+  int rejected_frames = 0;
+  const auto advance = [&](int frames) {
+      for (int frame = 0; frame < frames; ++frame) {
+        if (!runner.run()) {++rejected_frames;}
+        writeCommands(runner, addresses, model.get(), data.get());
+        mj_step(model.get(), data.get());
+      }
+    };
+
+  advance(450);
+  const Vec3<float> start = diagnostics.bodyPosition(data.get());
+  ASSERT_TRUE(runner.requestFrontJump());
+  float maximum_height = start.z();
+  float minimum_pitch = 0.0F;
+  float maximum_pitch = 0.0F;
+  int minimum_pitch_frame = 0;
+  for (int frame = 0; frame < 550; ++frame) {
+    if (!runner.run()) {++rejected_frames;}
+    writeCommands(runner, addresses, model.get(), data.get());
+    mj_step(model.get(), data.get());
+    maximum_height = std::max(maximum_height, diagnostics.bodyPosition(data.get()).z());
+    if (runner.stateEstimate().rpy.y() < minimum_pitch) {
+      minimum_pitch = runner.stateEstimate().rpy.y();
+      minimum_pitch_frame = frame;
+    }
+    maximum_pitch = std::max(maximum_pitch, runner.stateEstimate().rpy.y());
+  }
+  const Vec3<float> finish = diagnostics.bodyPosition(data.get());
+
+  RecordProperty("forward_jump_displacement_m", std::to_string(finish.x() - start.x()));
+  RecordProperty("forward_jump_peak_height_m", std::to_string(maximum_height));
+  RecordProperty("forward_jump_minimum_pitch_rad", std::to_string(minimum_pitch));
+  RecordProperty("forward_jump_maximum_pitch_rad", std::to_string(maximum_pitch));
+  RecordProperty("forward_jump_minimum_pitch_frame", minimum_pitch_frame);
+  EXPECT_GT(maximum_height - start.z(), 0.025F);
+  EXPECT_GT(finish.x() - start.x(), 0.25F);
+  EXPECT_GT(minimum_pitch, -0.30F);
+  EXPECT_LT(maximum_pitch, 0.30F);
+  EXPECT_GT(finish.z(), 0.20F);
+  EXPECT_LE(rejected_frames, 2);
+}

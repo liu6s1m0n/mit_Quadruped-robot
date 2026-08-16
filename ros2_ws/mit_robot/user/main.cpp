@@ -8,11 +8,11 @@
 namespace
 {
 constexpr float kStandingHeight = 0.27F;
-// 正值向前、负值向后。当前正式仿真前进/后退速度为 0.40 m/s。
-//速度参数 重要！！！
-constexpr float kWalkingForwardSpeed = 0.40F;
+// 慢档用于崎岖地形稳定性测试；快档只在原 0.30 m/s 基础上适度提速。
+constexpr float kSlowWalkingForwardSpeed = 0.18F;
+constexpr float kFastWalkingForwardSpeed = 0.36F;
 constexpr float kWalkingLateralSpeed = 0.25F;
-constexpr float kTurningYawRate = 0.35F;
+constexpr float kTurningYawRate = 0.30F;
 }
 
 int main()
@@ -20,7 +20,8 @@ int main()
   try {
     SimulationBridge bridge(MYMIT_ROBOT_SCENE_PATH);
     bridge.setStandingHeight(kStandingHeight);
-    bridge.setWalkingForwardSpeed(kWalkingForwardSpeed);
+    bridge.setSlowWalkingForwardSpeed(kSlowWalkingForwardSpeed);
+    bridge.setFastWalkingForwardSpeed(kFastWalkingForwardSpeed);
     bridge.setWalkingLateralSpeed(kWalkingLateralSpeed);
     bridge.setTurningYawRate(kTurningYawRate);
     return bridge.run();

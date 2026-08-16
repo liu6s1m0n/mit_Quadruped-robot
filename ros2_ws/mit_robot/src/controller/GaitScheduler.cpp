@@ -172,7 +172,7 @@ void GaitScheduler<T>::step()
       gait_data.contact_state_scheduled(foot);
     gait_data.touchdown_scheduled(foot) = 0;
     gait_data.liftoff_scheduled(foot) = 0;
-
+    //如果该腿未启用，则直接清零，避免在支撑/摆动切换时产生触地/离地事件。
     if (gait_data.gait_enabled(foot) == 0) {
       gait_data.phase_variable(foot) = T(0);
       gait_data.phase_stance(foot) = T(0);
@@ -194,7 +194,9 @@ void GaitScheduler<T>::step()
       switch_phase >= T(1) || (switch_phase > T(0) && phase <= switch_phase);
 
     if (in_stance) {
+      //表示该腿计划支撑
       gait_data.contact_state_scheduled(foot) = 1;
+      //计算支撑子相位、摆动子相位和剩余时间
       gait_data.phase_stance(foot) = std::clamp(
         phase / switch_phase, T(0), T(1));
       gait_data.phase_swing(foot) = T(0);
@@ -295,29 +297,29 @@ void GaitScheduler<T>::createGait()
   if (!gaitTypeIsValid(gait_data.next_gait)) {
     throw std::invalid_argument("invalid requested gait type");
   }
-
+  //四条腿全部启用   四条腿相位缩放均为 1
   const Eigen::Vector4i all_legs = Eigen::Vector4i::Ones();
   const Vec4<T> unit_scale = Vec4<T>::Ones();
-
+  /*周期 = 10 s 支撑比例 = 1 所有腿支撑  不允许覆盖*/
   switch (gait_data.next_gait) {
     case GaitType::STAND:
       configureGait(
         "STAND", T(10), T(1), all_legs,
         Vec4<T>(T(0.5), T(0.5), T(0.5), T(0.5)), unit_scale, false);
       break;
-
+  /*仍然是四腿支撑，但周期参数为 1 秒。*/
     case GaitType::STAND_CYCLE:
       configureGait(
         "STAND_CYCLE", T(1), T(1), all_legs,
         Vec4<T>(T(0.5), T(0.5), T(0.5), T(0.5)), unit_scale, false);
       break;
-
+  /*周期 = 1.25 s  支撑比例 = 0.8  摆动比例 = 0.2 每条腿相位错开，用于逐腿稳定行走。*/
     case GaitType::STATIC_WALK:
       configureGait(
         "STATIC_WALK", T(1.25), T(0.8), all_legs,
         Vec4<T>(T(0.25), T(0), T(0.75), T(0.5)), unit_scale, true);
       break;
-
+  /*周期 = 0.5 s  支撑比例 = 0.625  摆动比例 = 0.375 每条腿相位错开，用于平稳行走。*/
     case GaitType::AMBLE:
       configureGait(
         "AMBLE", T(0.5), T(0.625), all_legs,
@@ -326,7 +328,7 @@ void GaitScheduler<T>::createGait()
     
     /*参数含义：0.5 是完整步态周期（秒），0.6 是支撑相占比。
       当前支撑时间为 0.30 秒、摆动时间为 0.20 秒。这里保持原接触时序，
-      使 GaitScheduler、状态估计器和 20 Hz MPC 接触表继续严格同步；
+      使 GaitScheduler、状态估计器和 MPC 接触表继续严格同步；
       抬脚响应改由 swing_height_ 和行走关节 PD 提升。*/
     case GaitType::TROT_WALK:
       configureGait(
@@ -352,30 +354,30 @@ void GaitScheduler<T>::createGait()
         Vec4<T>(T(0), T(0.5), T(0), T(0.5)), unit_scale, true);
       gait_data.initial_phase = T(0.25);
       break;
-
+    /*周期 = 0.4 s  支撑比例 = 0.4  前腿一组、后腿一组*/
     case GaitType::BOUND:
       configureGait(
         "BOUND", T(0.4), T(0.4), all_legs,
         Vec4<T>(T(0), T(0), T(0.5), T(0.5)), unit_scale, true);
       break;
-
+    /*各腿使用不同相位偏移*/
     case GaitType::ROTARY_GALLOP:
       configureGait(
         "ROTARY_GALLOP", T(0.4), T(0.2), all_legs,
         Vec4<T>(T(0), T(0.8571), T(0.3571), T(0.5)), unit_scale, true);
       break;
-
+    /*和旋转疾驰类似，但完整周期更长*/
     case GaitType::TRAVERSE_GALLOP:
       configureGait(
         "TRAVERSE_GALLOP", T(0.5), T(0.2), all_legs,
         Vec4<T>(T(0), T(0.8571), T(0.3571), T(0.5)), unit_scale, true);
       break;
-
+    /*第一条腿的相位缩放也是 0。*/
     case GaitType::PRONK:
       configureGait(
         "PRONK", T(0.5), T(0.5), all_legs, Vec4<T>::Zero(), unit_scale, true);
       break;
-
+    /*第一条腿的相位缩放也是 0*/
     case GaitType::THREE_FOOT:
       configureGait(
         "THREE_FOOT", T(0.4), T(0.666),

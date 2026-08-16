@@ -88,23 +88,23 @@ struct GaitData
 
   Eigen::Vector4i gait_enabled = Eigen::Vector4i::Zero();
 
-  Vec4<T> period_time = Vec4<T>::Zero();
-  Vec4<T> time_stance = Vec4<T>::Zero();
-  Vec4<T> time_swing = Vec4<T>::Zero();
-  Vec4<T> time_stance_remaining = Vec4<T>::Zero();
-  Vec4<T> time_swing_remaining = Vec4<T>::Zero();
+  Vec4<T> period_time = Vec4<T>::Zero(); // 整个步态周期，s。
+  Vec4<T> time_stance = Vec4<T>::Zero(); // 支撑时间，s。
+  Vec4<T> time_swing = Vec4<T>::Zero();  // 摆动时间，s。
+  Vec4<T> time_stance_remaining = Vec4<T>::Zero(); // 剩余支撑时间，s。
+  Vec4<T> time_swing_remaining = Vec4<T>::Zero();  // 剩余摆动时间，s。
 
-  Vec4<T> switching_phase = Vec4<T>::Zero();
-  Vec4<T> phase_variable = Vec4<T>::Zero();
-  Vec4<T> phase_offset = Vec4<T>::Zero();
-  Vec4<T> phase_scale = Vec4<T>::Zero();
-  Vec4<T> phase_stance = Vec4<T>::Zero();
-  Vec4<T> phase_swing = Vec4<T>::Zero();
+  Vec4<T> switching_phase = Vec4<T>::Zero(); // 从支撑切换到摆动的名义相位。
+  Vec4<T> phase_variable = Vec4<T>::Zero();  // 全局归一化相位，[0, 1)。
+  Vec4<T> phase_offset = Vec4<T>::Zero(); // 相位偏移量
+  Vec4<T> phase_scale = Vec4<T>::Zero();  // 相位缩放量
+  Vec4<T> phase_stance = Vec4<T>::Zero(); // 归一化支撑子相位
+  Vec4<T> phase_swing = Vec4<T>::Zero();  // 归一化摆动子相位
 
-  Eigen::Vector4i contact_state_scheduled = Eigen::Vector4i::Zero();
-  Eigen::Vector4i contact_state_previous = Eigen::Vector4i::Zero();
-  Eigen::Vector4i touchdown_scheduled = Eigen::Vector4i::Zero();
-  Eigen::Vector4i liftoff_scheduled = Eigen::Vector4i::Zero();
+  Eigen::Vector4i contact_state_scheduled = Eigen::Vector4i::Zero();// 计划接触状态，1=支撑，0=摆动
+  Eigen::Vector4i contact_state_previous = Eigen::Vector4i::Zero();// 记录上周期的接触状态
+  Eigen::Vector4i touchdown_scheduled = Eigen::Vector4i::Zero();// 计划触地事件，1=触地，0=未触地
+  Eigen::Vector4i liftoff_scheduled = Eigen::Vector4i::Zero();// 计划离地事件，1=离地，0=未离地
 
   /** @brief 按 LegId 读取本周期计划接触状态。 */
   bool contactScheduled(LegId leg) const noexcept

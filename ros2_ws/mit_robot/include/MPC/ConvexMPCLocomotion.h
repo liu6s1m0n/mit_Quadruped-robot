@@ -43,7 +43,8 @@ public:
   ConvexMPCLocomotion(
     const Quadruped<T> & quadruped, T control_time_step,
     std::size_t iterations_between_mpc = 15,
-    const SolverSettings<T> & settings = SolverSettings<T>{});
+    const SolverSettings<T> & settings = SolverSettings<T>{},
+    std::size_t iterations_per_gait_segment = 0);
 
   void initialize() noexcept;
   void setGait(GaitType gait);
@@ -64,6 +65,8 @@ private:
 
   T control_time_step_;
   std::size_t iterations_between_mpc_;
+  /*为 0 的构造参数会回退为求解间隔，保留独立使用该类时的原有行为。*/
+  std::size_t iterations_per_gait_segment_;
   std::size_t iteration_ = 0;
   GaitType gait_type_ = GaitType::STAND;
   // 用户速度位于机身坐标系；commanded_* 是加速度限制后真正进入 MPC 的命令。
@@ -75,11 +78,12 @@ private:
 
   /*前后/左右速度命令的总加速度上限。由 0.75 提高到 1.0 m/s²，
     0.40 m/s 命令约 0.4 秒到达，同时保留连续斜坡以避免阶跃冲击。*/
-  T maximum_linear_acceleration_ = T(1.0);
+  T maximum_linear_acceleration_ = T(0.75);
   T maximum_yaw_acceleration_ = T(0.8);
   Vec3<T> command_position_world_ = Vec3<T>::Zero();
   bool command_initialized_ = false;
   std::array<Vec3<T>, kNumLegs> cached_reaction_forces_world_{};
+  std::array<bool, kNumLegs> cached_contact_state_{};
   bool cached_solution_valid_ = false;
   bool cached_solution_converged_ = false;
   SolverMPC<T> solver_;

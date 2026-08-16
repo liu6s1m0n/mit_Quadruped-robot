@@ -86,7 +86,7 @@ TEST(LegTest, SimLegReadsAllLegsAfterMujocoForward)
   }
 }
 
-TEST(LegTest, HardwareLegKeepsHardwareInterfaceSafeUntilImplemented)
+TEST(LegTest, HardwareLegStaysInvalidUntilFeedbackIsInjected)
 {
   HardwareLeg leg(LegId::RL);
   const auto state = leg.read();
@@ -94,6 +94,26 @@ TEST(LegTest, HardwareLegKeepsHardwareInterfaceSafeUntilImplemented)
   EXPECT_EQ(state.leg, LegId::RL);
   EXPECT_FALSE(state.valid);
   EXPECT_FALSE(leg.leg.valid);
+}
+
+TEST(LegTest, HardwareLegReturnsInjectedEncoderFeedback)
+{
+  HardwareLeg leg(LegId::RL);
+  JointState<float> input;
+  input.leg = LegId::RL;
+  input.position << 0.1F, 0.2F, 0.3F;
+  input.velocity << 1.0F, 2.0F, 3.0F;
+  input.torque_estimate << 4.0F, 5.0F, 6.0F;
+  input.timestamp = 1.0F;
+  input.valid = true;
+
+  ASSERT_TRUE(leg.update(input));
+  const auto state = leg.read();
+  EXPECT_TRUE(state.valid);
+  EXPECT_EQ(state.leg, LegId::RL);
+  EXPECT_TRUE(state.position.isApprox(input.position));
+  EXPECT_TRUE(state.velocity.isApprox(input.velocity));
+  EXPECT_TRUE(state.torque_estimate.isApprox(input.torque_estimate));
 }
 
 TEST(LegTest, FactorySelectsBetweenSimulatorAndHardware)

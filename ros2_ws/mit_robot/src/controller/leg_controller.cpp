@@ -270,7 +270,7 @@ JointCommand<T> LegController<T>::command(LegId leg_id, T timestamp)
 
 // ---------- 单腿正运动学和雅可比 ----------
 
-// 计算一条三自由度腿的足端位置 p 和解析雅可比 J。
+// 计算一条三自由度腿的足端位置 p 和解析雅可比 J。注意角度为0的位置，腿是竖直向下的
 //
 // 关节向量约定：
 //   q(0) = Hip 外展/内收角；q(1) = thigh 俯仰角；q(2) = calf 俯仰角。
@@ -286,13 +286,16 @@ void computeLegJacobianAndPosition(
 {
   // 由 LegId 取得这一条腿的模型参数；不直接访问具体 GO1 参数文件。
   const auto & leg = quad.leg(leg_id);
-  // l1：Hip 横向连杆；l2：大腿；l3：小腿。
+  // l1：Hip 横向连杆；l2：大腿；l3：小腿。;l
   const T l1 = leg.hip_link_length;
   const T l2 = leg.thigh_link_length;
   const T l3 = leg.calf_link_length;
   // 左腿为 +1，右腿为 -1，用于处理 Hip 横向连杆的镜像关系。
   const T side_sign = quad.sideSign(leg_id);
-
+  
+  /*Hip 外展 (q0)	绕 X 轴	腿向外摆（侧向运动）
+    Thigh 俯仰 (q1)	绕 Y 轴	大腿向前摆动（朝 -X）
+    Calf 俯仰 (q2)	绕 Y 轴	小腿向前摆动（朝 -X）*/
   // 缓存三个关节角的正弦和余弦，避免在位置和雅可比公式中重复计算。
   const T s1 = std::sin(q(0));
   const T s2 = std::sin(q(1));

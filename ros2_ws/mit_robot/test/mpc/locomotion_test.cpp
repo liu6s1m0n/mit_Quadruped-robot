@@ -103,6 +103,34 @@ TEST(MpcLocomotion, SolvesAtConfiguredIntervalAndReusesForces)
   EXPECT_TRUE(refreshed.mpc_updated);
 }
 
+TEST(MpcLocomotion, KeepsGaitTimingIndependentAndRefreshesAtContactChanges)
+{
+  const auto quadruped = robots::unitree_go1::makeModel<double>();
+  mpc::SolverSettings<double> settings;
+  settings.horizon = 10;
+  mpc::ConvexMPCLocomotion<double> controller(
+    quadruped, 0.002, 20, settings, 25);
+  controller.setGait(GaitType::TROT);
+
+  auto result = controller.run(
+    test_support::standingEstimate(), test_support::standingDesired(),
+    test_support::standingFeet());
+  ASSERT_TRUE(result.valid);
+  EXPECT_TRUE(result.mpc_updated);
+  EXPECT_NEAR(result.stance_time[0], 0.30, 1.0e-6);
+  EXPECT_NEAR(result.swing_time[0], 0.20, 1.0e-6);
+
+  for (int cycle = 1; cycle < 25; ++cycle) {
+    result = controller.run(
+      test_support::standingEstimate(), test_support::standingDesired(),
+      test_support::standingFeet());
+  }
+  result = controller.run(
+    test_support::standingEstimate(), test_support::standingDesired(),
+    test_support::standingFeet());
+  EXPECT_TRUE(result.mpc_updated);
+}
+
 TEST(MpcLocomotion, RejectsUnsafeForwardVelocity)
 {
   const auto quadruped = robots::unitree_go1::makeModel<double>();

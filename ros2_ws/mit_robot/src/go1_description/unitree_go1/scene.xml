@@ -12,10 +12,24 @@
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <material name="gravel" rgba="0.34 0.31 0.27 1" roughness="0.9" specular="0.05"/>
+
+    <!--
+      Two narrow gravel strips. Both preserve the same rough surface; the
+      second additionally climbs along +X and descends after its crest.
+      Both images fade to zero at every edge to join the large flat floor.
+    -->
+    <hfield name="gravel_flat" file="gravel_heightfield.png" size="2.0 0.7 0.12 0.04"/>
+    <hfield name="gravel_slope" file="gravel_slope_heightfield.png" size="2.0 0.7 0.20 0.04"/>
   </asset>
 
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <!-- Flat gravel: x=[3, 7]. Sloped gravel: x=[8, 12]. Both use y=[-0.7, 0.7]. -->
+    <geom name="gravel_flat" type="hfield" hfield="gravel_flat" pos="5 0 0.002"
+      material="gravel" friction="1.0 0.02 0.002" condim="4" priority="1"/>
+    <geom name="gravel_slope" type="hfield" hfield="gravel_slope" pos="10 0 0.002"
+      material="gravel" friction="1.0 0.02 0.002" condim="4" priority="1"/>
   </worldbody>
 </mujoco>

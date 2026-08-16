@@ -155,7 +155,7 @@ SimLeg::JointAddress SimLeg::requireJoint(
   return result;
 }
 
-// ---------- 真实硬件腿数据源（HardwareLeg，占位） ----------
+// ---------- 真实硬件腿数据源 ----------
 
 // 保存硬件腿编号并初始化最近一次采样；非法腿编号会立即抛出异常。
 HardwareLeg::HardwareLeg(LegId leg_id)
@@ -165,12 +165,22 @@ HardwareLeg::HardwareLeg(LegId leg_id)
   leg.leg = leg_id_;
 }
 
-// 真实驱动尚未接入：保留统一 read() 接口，但明确返回 valid=false。
-// 后续应在这里读取电机总线的位置、速度、估计力矩和硬件时间戳。
+bool HardwareLeg::update(const JointState<float> & state)
+{
+  const bool state_valid = state.valid && state.leg == leg_id_ &&
+    state.position.allFinite() && state.velocity.allFinite() &&
+    state.torque_estimate.allFinite() && std::isfinite(state.timestamp);
+  if (!state_valid) {
+    leg = JointState<float>{};
+    leg.leg = leg_id_;
+    return false;
+  }
+  leg = state;
+  return true;
+}
+
 JointState<float> HardwareLeg::read()
 {
-  leg = JointState<float>{};
-  leg.leg = leg_id_;
   return leg;
 }
 

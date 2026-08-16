@@ -74,8 +74,10 @@ template<typename T>
 void PositionVelocityEstimator<T>::reset()
 {
   state_.setZero();
+  /*将协方差设置为：表示初始状态不确定性较大。*/
   covariance_.setIdentity();
   covariance_ *= parameters_.initial_covariance;
+
   result_ = StateEstimate<T>{};
   for (auto & position : foot_position_body_) {
     position.setZero();
@@ -88,6 +90,7 @@ void PositionVelocityEstimator<T>::reset()
   orientation_estimator_.reset();
 }
 
+/*大致看懂了*/
 template<typename T>
 void PositionVelocityEstimator<T>::configureObservationMatrix()
 {
@@ -162,6 +165,7 @@ bool PositionVelocityEstimator<T>::updateFootKinematics(
       quadruped_->hipLocation(leg_id) + foot_from_hip;
 
     // 足端相对机身的速度包含机身转动项 omega x p 和关节运动项 J*qd。
+    // 绝对速度应该还要有机体速度
     foot_velocity_body_[index] =
       orientation.angular_velocity_body.cross(foot_position_body_[index]) +
       jacobian * joints.velocity;
@@ -187,32 +191,42 @@ void PositionVelocityEstimator<T>::initializeState(
   // 机身高度由接触腿足端相对位置估计，使足端碰撞球最低点接近地面。
   T weighted_height = T(0);
   T total_contact = T(0);
+
   for (std::size_t index = 0; index < kNumLegs; ++index) {
+    /*把足端相对机身位置旋转到世界坐标系。
+      注意此时还没有加机身平移*/
     const Vec3<T> foot_relative_world =
       orientation.rotation_world_from_body * foot_position_body_[index];
+    /*取当前腿的接触概率作为权重*/
     const T weight = contact_probabilities_[index];
-    // 足端状态位于碰撞球球心；平地接触时球心高度为 foot_radius。
+    // 足端状态位于碰撞球球心；平地接触时球心世界高度为 foot_radius。
+    // 机身高度 = 足端球心接触高度-足端相对机身世界 z 坐标
     weighted_height += weight *
       (quadruped_->leg(static_cast<LegId>(index)).foot_radius -
       foot_relative_world.z());
+    //累加权重
     total_contact += weight;
   }
+  //如果四条腿接触概率都接近零 很常用以后代码可以调用
   if (total_contact <= std::numeric_limits<T>::epsilon()) {
-    // 尚无接触信息时用模型标称高度作为安全初值。
+    // 尚无接触信息时，用模型标称高度作为安全初值。
     state_.z() = quadruped_->nominalBodyHeight();
   } else {
+    //使用接触概率加权的高度平均值。这比随便选择一条腿更稳定。
     state_.z() = weighted_height / total_contact;
   }
 
   // 根据已初始化的机身位置，将四个足端状态放到世界坐标系中。
+  // 取得当前初始化的机身位置。
   const Vec3<T> body_position = state_.template segment<3>(0);
+  // 足端世界位置
   for (std::size_t index = 0; index < kNumLegs; ++index) {
     const Eigen::Index foot_state = static_cast<Eigen::Index>(6 + 3 * index);
     state_.template segment<3>(foot_state) =
       body_position +
       orientation.rotation_world_from_body * foot_position_body_[index];
   }
-
+  // 初始协方差设置为较大值，表示对初始状态的不确定性。
   covariance_.setIdentity();
   covariance_ *= parameters_.initial_covariance;
   last_timestamp_ = orientation.timestamp;
@@ -229,25 +243,32 @@ bool PositionVelocityEstimator<T>::run()
     result_ = StateEstimate<T>{};
     return false;
   }
+  /*保存本周期姿态估计结果。包括：
+    旋转矩阵；四元数；roll/pitch/yaw；
+    角速度；世界系加速度；时间戳。*/
   const StateEstimate<T> orientation = orientation_estimator_.result();
-
+  //根据当前腿部关节状态计算：foot_position_body_；foot_velocity_body_。
   if (!updateFootKinematics(orientation)) {
     result_ = orientation;
     result_.valid = false;
     return false;
   }
-
+  /*第一次有效运行时：
+    初始化机身高度；初始化足端世界位置；初始化协方差；
+    输出第一帧结果。这一帧不执行卡尔曼预测和更新。*/
   if (!initialized_) {
     initializeState(orientation);
     return updateResult(orientation);
   }
-
+  /*计算时间间隔*/
   const T time_step = orientation.timestamp - last_timestamp_;
+  /*如果 dt 非有限，返回失败*/
   if (!std::isfinite(static_cast<double>(time_step))) {
     result_ = orientation;
     result_.valid = false;
     return false;
   }
+  /*仿真发生 Reset；硬件时钟回退；数据顺序异常。*/
   if (time_step < T(0)) {
     // 仿真复位或硬件时钟回跳时丢弃旧状态，从当前几何关系重新初始化。
     initialized_ = false;
@@ -258,6 +279,7 @@ bool PositionVelocityEstimator<T>::run()
     // 同一时间戳重复读取时不进行二次积分，但仍返回当前有效估计。
     return updateResult(orientation);
   }
+  /*如果时间步长超过最大值，返回失败*/
   if (time_step > parameters_.maximum_time_step) {
     result_ = orientation;
     result_.valid = false;
@@ -274,9 +296,13 @@ bool PositionVelocityEstimator<T>::run()
 
   // IMU 加速度计输出比力，转到世界系后还要加上世界重力才能得到线加速度。
   const Vec3<T> gravity_world(T(0), T(0), -parameters_.gravity);
-  const Vec3<T> linear_acceleration_world =
-    orientation.acceleration_world + gravity_world;
-
+  // 没有线加速度的硬件不能用角加速度替代；退化为常速度预测，随后仍由
+  // 支撑足相对位置、零速度和高度观测修正状态。
+  Vec3<T> linear_acceleration_world = Vec3<T>::Zero();
+  if (orientation.acceleration_valid) {
+    linear_acceleration_world = orientation.acceleration_world + gravity_world;
+  }
+  // 预测协方差 = A*P*A' + Q，Q 为过程噪声。
   StateMatrix process_noise = StateMatrix::Zero();
   process_noise.template block<3, 3>(0, 0) =
     parameters_.process_noise_position * (time_step / T(20)) *
@@ -287,7 +313,7 @@ bool PositionVelocityEstimator<T>::run()
   process_noise.template block<12, 12>(6, 6) =
     parameters_.process_noise_foot_position * time_step *
     Eigen::Matrix<T, 12, 12>::Identity();
-
+  // 观测噪声矩阵 R，按接触概率动态缩放。
   ObservationCovariance measurement_noise =
     ObservationCovariance::Zero();
   measurement_noise.template block<12, 12>(0, 0) =
@@ -299,18 +325,18 @@ bool PositionVelocityEstimator<T>::run()
   measurement_noise.template block<4, 4>(24, 24) =
     parameters_.sensor_noise_foot_height *
     Eigen::Matrix<T, 4, 4>::Identity();
-
+  // 观测向量 z = [p_body-p_foot; v_body+v_foot; z_foot]，28 维。
   ObservationVector observation = ObservationVector::Zero();
   const Vec3<T> predicted_body_position = state_.template segment<3>(0);
   const Vec3<T> predicted_body_velocity = state_.template segment<3>(3);
-
   for (std::size_t index = 0; index < kNumLegs; ++index) {
     const Eigen::Index vector_index = static_cast<Eigen::Index>(3 * index);
     const Eigen::Index foot_state = 6 + vector_index;
     const T trust = contact_probabilities_[index];
+    /*接触概率越低，噪声越大，滤波器越不信任该腿*/
     const T noise_scale =
       T(1) + (T(1) - trust) * parameters_.suspect_noise_multiplier;
-
+    /*足端相对位置转世界坐标  足端相对速度转世界坐标*/
     const Vec3<T> foot_relative_world =
       orientation.rotation_world_from_body * foot_position_body_[index];
     const Vec3<T> foot_relative_velocity_world =
@@ -356,9 +382,11 @@ bool PositionVelocityEstimator<T>::run()
     result_.valid = false;
     return false;
   }
-
+  /*求解：S⁻¹ · innovation*/
   const auto solved_innovation = decomposition.solve(innovation);
+  /*卡尔曼状态更新：*/
   state_ += predicted_covariance * observation_matrix_.transpose() * solved_innovation;
+  /*更新协方差*/
   const auto solved_observation = decomposition.solve(observation_matrix_);
   covariance_ =
     (StateMatrix::Identity() -

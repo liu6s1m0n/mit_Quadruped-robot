@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+// 验证 MPC 求解器的默认迭代配置、站立力约束以及非法输入保护。
+
 #include <vector>
 
 #include "MPC/SolverMPC.h"
@@ -9,8 +11,16 @@
 namespace
 {
 
+TEST(MpcSolver, UsesRaisedDefaultIterationLimit)
+{
+  // 默认设置应保留项目为提高求解收敛裕量而采用的迭代上限。
+  const mpc::SolverSettings<double> settings;
+  EXPECT_EQ(settings.maximum_iterations, 75U);
+}
+
 TEST(MpcSolver, SupportsStandingWeightAndFrictionConstraints)
 {
+  // 四足全支撑时，输出力应满足法向力边界和摩擦锥约束。
   const auto quadruped = robots::unitree_go1::makeModel<double>();
   mpc::SolverSettings<double> settings;
   settings.horizon = 4;
@@ -37,6 +47,7 @@ TEST(MpcSolver, SupportsStandingWeightAndFrictionConstraints)
 
 TEST(MpcSolver, RejectsInvalidInputWithoutPublishingForces)
 {
+  // 无效状态不能让求解器发布可被控制器误用的反作用力。
   const auto quadruped = robots::unitree_go1::makeModel<double>();
   mpc::SolverSettings<double> settings;
   settings.horizon = 4;

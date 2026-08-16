@@ -97,6 +97,9 @@ ImuData<float> SimImu::read()
 
   // 归一化四元数以保证旋转的有效性，并标记数据有效
   result.orientation_world_from_body.normalize();
+  result.orientation_valid = true;
+  result.acceleration_valid = true;
+  result.angular_acceleration_valid = false;
   result.valid = true;
 
   // 将本次读取的数据保存到成员 imu，供外部直接访问
@@ -133,14 +136,82 @@ int SimImu::requireSensor(
   return address;
 }
 
-// ---------- 真实硬件 IMU 数据源（HardwareImu，占位） ----------
+// ---------- 真实硬件 IMU 数据源 ----------
+
+bool HardwareImu::update(const ImuData<float> & sample)
+{
+  ImuData<float> validated = sample;
+  const bool base_valid = sample.valid &&
+    sample.angular_velocity_body.allFinite() &&
+    (!sample.acceleration_valid || sample.acceleration_body.allFinite()) &&
+    (!sample.angular_acceleration_valid ||
+    sample.angular_acceleration_body.allFinite()) &&
+    std::isfinite(sample.timestamp);
+  if (!base_valid) {
+    imu = ImuData<float>{};
+    return false;
+  }
+
+  if (sample.orientation_valid) {
+    const float norm = sample.orientation_world_from_body.norm();
+    if (!sample.orientation_world_from_body.coeffs().allFinite() ||
+      !std::isfinite(norm) || norm <= std::numeric_limits<float>::epsilon())
+    {
+      imu = ImuData<float>{};
+      return false;
+    }
+    validated.orientation_world_from_body.normalize();
+  } else {
+    // 没有磁力计、视觉或设备姿态解算时，不伪造绝对方向。
+    validated.orientation_world_from_body = Eigen::Quaternionf::Identity();
+  }
+
+  if (!validated.acceleration_valid) {
+    validated.acceleration_body.setZero();
+  }
+  if (!validated.angular_acceleration_valid) {
+    validated.angular_acceleration_body.setZero();
+  }
+
+  imu = validated;
+  return true;
+}
+
+bool HardwareImu::update(const HardwareImuMeasurement & measurement)
+{
+  if (!measurement.valid || !measurement.rpy_world_from_body.allFinite() ||
+    !measurement.angular_velocity_body.allFinite() ||
+    !measurement.angular_acceleration_body.allFinite() ||
+    (measurement.acceleration_valid &&
+    !measurement.acceleration_body.allFinite()) ||
+    !std::isfinite(measurement.timestamp))
+  {
+    imu = ImuData<float>{};
+    return false;
+  }
+
+  const float roll = measurement.rpy_world_from_body.x();
+  const float pitch = measurement.rpy_world_from_body.y();
+  const float yaw = measurement.rpy_world_from_body.z();
+  ImuData<float> sample;
+  sample.orientation_world_from_body =
+    Eigen::AngleAxisf(yaw, Vec3<float>::UnitZ()) *
+    Eigen::AngleAxisf(pitch, Vec3<float>::UnitY()) *
+    Eigen::AngleAxisf(roll, Vec3<float>::UnitX());
+  sample.angular_velocity_body = measurement.angular_velocity_body;
+  sample.angular_acceleration_body = measurement.angular_acceleration_body;
+  sample.acceleration_body = measurement.acceleration_body;
+  sample.timestamp = measurement.timestamp;
+  sample.orientation_valid = true;
+  sample.acceleration_valid = measurement.acceleration_valid;
+  sample.angular_acceleration_valid = true;
+  sample.valid = true;
+  return update(sample);
+}
 
 ImuData<float> HardwareImu::read()
 {
-  // TODO(real-hardware)：接入可输出姿态角/角速度的真实 IMU 驱动后，
-  // 在这里将设备姿态转换为 orientation_world_from_body，并填充其余数据。
-  // 当前尚未实现，统一返回无效数据，避免调用方误用占位值。
-  imu = ImuData<float>{};
+  // 驱动与控制循环同步运行：驱动先 update()，估计器随后 read()。
   return imu;
 }
 
