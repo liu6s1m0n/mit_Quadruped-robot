@@ -1,5 +1,6 @@
-/*! @file FloatingBaseModel.cpp
- *  @brief 刚体浮动基座模型数据结构的实现
+/**
+ * @file FloatingBaseModel.cpp
+ * @brief 刚体浮动基座模型和 Featherstone 动力学算法的实现。
  *
  * 本类存储 Featherstone 在《Rigid Body Dynamics Algorithms》中描述的
  * 运动学树（可在 MIT 内网下载：

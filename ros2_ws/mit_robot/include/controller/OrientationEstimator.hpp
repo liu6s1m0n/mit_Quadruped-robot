@@ -23,7 +23,9 @@ enum class OrientationEstimatorMode : std::uint8_t
   /** 直接采用仿真 IMU 给出的姿态四元数，供调试和算法对照使用。 */
   SIMULATION_TRUTH = 0,
   /** 融合 IMU 姿态角、角速度和加速度的真实姿态估计。 */
-  IMU_FUSION = 1
+  IMU_FUSION = 1,
+  /** 直接使用硬件 IMU 给出的角度，不进行陀螺仪姿态积分。 */
+  HARDWARE_DIRECT = 2
 };
 
 /**
@@ -108,11 +110,16 @@ private:
   /** @brief 把旋转矩阵转换成 roll、pitch、yaw，单位 rad。 */
   static Vec3<T> rotationMatrixToRpy(const Mat3<T> & rotation);
 
-  /** @brief 校验并转换 IMU 或仿真器给出的姿态四元数。 */
+  /** @brief 校验并转换 IMU 或仿真器给出的可选姿态四元数。 */
   static bool readImuOrientation(
     const ImuData<float> & imu, Eigen::Quaternion<T> & orientation);
 
-  /** @brief 融合 IMU 直接姿态、角速度与加速度重力方向。 */
+  /**
+   * @brief 融合角速度与加速度重力方向；设备提供姿态时再加入绝对姿态修正。
+   *
+   * 没有设备姿态时首帧用重力初始化 roll/pitch、令 yaw=0。此后 yaw 只能由
+   * 陀螺仪积分，因此属于局部航向并会随时间漂移。
+   */
   bool computeImuFusionOrientation(
     const ImuData<float> & imu, T timestamp,
     Eigen::Quaternion<T> & orientation);

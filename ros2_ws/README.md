@@ -11,19 +11,23 @@
 | `mit_robot/src/go1_description/unitree_go1/go1.xml` | MuJoCo `timestep` | XML 未显式设置，MuJoCo默认 `0.002 s` | `0.002 s`（500 Hz） | 物理、状态估计、FSM、WBC和最终关节PD统一周期；测试确认WBC不应降频。 |
 | `mit_robot/include/FSM/ControlFSMData.h` | `control_time_step` | `0.001 s` | 被 `RobotRunner` 覆盖为 `model->opt.timestep = 0.002 s` | 只有不从正式入口构造 FSM 时才会使用 1 ms 默认值。 |
 | `mit_robot/user/main.cpp` | `kStandingHeight` | — | `0.27 m` | 正式入口最终站立高度。 |
-| `mit_robot/user/main.cpp` | `kWalkingForwardSpeed` | — | `0.40 m/s` | MuJoCo Forward/Backward 两个方向开关使用的速度绝对值。 |
+| `mit_robot/user/main.cpp` | `kSlowWalkingForwardSpeed` / `kFastWalkingForwardSpeed` | — | `0.18 / 0.36 m/s` | MuJoCo 的 `Forward slow` 用于崎岖地形稳定行走，`Forward fast` 比原 `0.30 m/s` 适度提速。 |
 | `mit_robot/user/main.cpp` | `kWalkingLateralSpeed` | — | `0.25 m/s` | MuJoCo Left/Right 两个方向开关使用的速度绝对值。 |
 | `mit_robot/user/main.cpp` | `kTurningYawRate` | — | `0.35 rad/s` | MuJoCo Rotate CCW 开关使用的逆时针自转角速度。 |
 | `mit_robot/user/SimulationBridge.hpp` | `standing_height_` / UI 初始值 | `0.27 m` | 被 `main.cpp` 设置为 `0.27 m` | 仿真 UI 与控制器的初始目标。 |
-| `mit_robot/user/SimulationBridge.hpp` | `walking_forward_speed_` | `0.32 m/s` | 被 `main.cpp` 覆盖为 `0.40 m/s` | 前进和后退共用该速度绝对值。 |
+| `mit_robot/user/SimulationBridge.hpp` | `slow_walking_forward_speed_` / `fast_walking_forward_speed_` | `0.18 / 0.36 m/s` | 被 `main.cpp` 设置为相同值 | 慢档必须低于快档，两档均沿用 MPC 的平滑速度斜坡。 |
+| `mit_robot/user/SimulationBridge.hpp` | `walking_backward_speed_` | `0.30 m/s` | 未覆盖 | 后退速度保持拆档前的当前值。 |
 | `mit_robot/user/SimulationBridge.hpp` | `walking_lateral_speed_` | `0.25 m/s` | 被 `main.cpp` 设置为 `0.25 m/s` | 左移为正、右移为负。 |
 | `mit_robot/user/SimulationBridge.hpp` | `turning_yaw_rate_` | `0.35 rad/s` | 被 `main.cpp` 设置为 `0.35 rad/s` | 当前第五个开关执行逆时针自转。 |
-| `mit_robot/user/SimulationBridge.hpp` / `.cpp` | 五方向开关 | 全部关闭 | `Forward / Backward / Left / Right / Rotate CCW` 互斥 | 新打开的方向取得控制权；关闭当前方向后切回 BalanceStand。 |
+| `mit_robot/user/SimulationBridge.hpp` / `.cpp` | 六个运动开关 | 全部关闭 | `Forward slow / Forward fast / Backward / Left / Right / Rotate CCW` 互斥 | 新打开的运动取得控制权；关闭当前运动后切回 BalanceStand。 |
+| `mit_robot/user/SimulationBridge.cpp` | `Jump forward` 按钮 | 未触发 | 单次向前跳 | 仅在稳定的 BalanceStand 中接受；动作结束自动回站立，行走、倾斜或速度过大时拒绝。 |
+| `mit_robot/src/FSM/FSM_State_FrontJump.cpp` | 向前跳阶段时间 | — | `0.18 / 0.18 / 0.17 / 0.25 s` | 顺序为预蹲、水平化蹬伸、空中收腿、带俯仰阻尼的落地缓冲，总时长约 `0.78 s`。 |
+| `mit_robot/src/FSM/FSM_State_FrontJump.cpp` | 蹬伸分配 | — | 前腿 `[0,1.20,-1.25]`，后腿 `[0,1.10,-1.20] rad` | 足端以后扫为主并保留小幅前后腿差异，增加水平冲量同时抵消俯仰力矩。 |
 | `mit_robot/user/StandingHeightIpc.hpp` | 高度最小值 / 最大值 / 默认值 | `0.18 / 0.34 / 0.27 m` | 未覆盖 | 同时约束 ROS 2 服务、IPC 和 MuJoCo 滑块。 |
 | `mit_robot/user/SimulationBridge.cpp` | UI 高度范围 | `0.18～0.34 m` | 未覆盖 | 应与 `StandingHeightIpc.hpp` 保持一致。 |
 | `mit_robot/user/SimulationBridge.cpp` | 物理线程轮询休眠 | `1 ms` | 未覆盖 | 只影响主机调度和 CPU 占用，不改变 MuJoCo 的 2 ms 物理步长。 |
 | `mit_robot/user/SimulationDiagnostics.cpp` | 正式运行诊断输出周期 | `500`帧 | 约`1 s` | 主程序持续统计估计RMS、最大俯仰、最低高度、小腿碰地和控制拒绝帧；只读诊断，不修改控制。 |
-| `mit_robot/user/RobotRunner.hpp` | `defaultWalkingForwardSpeed()` | `0.32 m/s` | UI 方向命令覆盖为入口配置值 | 不经过方向接口时使用。 |
+| `mit_robot/user/RobotRunner.hpp` | `defaultWalkingForwardSpeed()` | `0.32 m/s` | UI 慢/快档命令覆盖为入口配置值 | 不经过方向接口时使用。 |
 | `mit_robot/user/RobotRunner.hpp` | `joint_initialization_duration_` | `0.4 s` | 未覆盖 | 上电关节回 home 的 smoothstep 时间；启动阶段不用于行走提速。 |
 | `mit_robot/user/RobotRunner.hpp` | `standing_height_target_` / `standing_height_command_` | `0.27 / 0.27 m` | 目标由入口或 UI 设置 | 目标值和经过限速后的实际命令值需区分。 |
 | `mit_robot/user/RobotRunner.hpp` | `standing_height_rate_limit_` | `0.08 m/s` | 未覆盖 | 第一层高度变化限速；500 Hz 时每周期最多 `0.00016 m`。 |
@@ -36,8 +40,9 @@
 
 | 文件 | 参数 | 初始化/默认值 | 当前最终值 | 说明 |
 |---|---|---:|---:|---|
-| `mit_robot/include/MPC/ConvexMPCLocomotion.h` | `iterations_between_mpc` | `15` 帧 | `25` 帧 | `FSM_State_Locomotion.cpp` 用 `round(0.05 / 0.002)` 覆盖，MPC 真正以 20 Hz 求解；中间 24 帧复用上一次接触力。 |
-| `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | MPC 刷新周期 | — | `0.05 s`（20 Hz） | 修改这一项比直接写死帧数更适合不同 WBC 周期。 |
+| `mit_robot/include/MPC/ConvexMPCLocomotion.h` | `iterations_between_mpc` | `15` 帧 | `20` 帧 | `FSM_State_Locomotion.cpp` 用 `round(0.04 / 0.002)` 覆盖，MPC 基础刷新频率为 25 Hz；接触组合变化时立即补算。 |
+| `mit_robot/include/MPC/ConvexMPCLocomotion.h` | `iterations_per_gait_segment` | 默认跟随求解间隔 | `25` 帧 | 正式链单独使用 `round(0.05 / 0.002)`，保持 0.5 s TROT 周期，不随求解频率改变。 |
+| `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | MPC 刷新周期 | — | `0.04 s`（25 Hz） | 与 0.05 s 步态分段周期解耦，接触切换仍保持严格同步。 |
 | `mit_robot/include/MPC/ConvexMPCLocomotion.h` | `maximum_linear_acceleration_` | `1.0 m/s²` | 未覆盖 | 前后/左右二维速度向量的总斜坡加速度；0.40 m/s命令约0.4秒到达。 |
 | `mit_robot/include/MPC/ConvexMPCLocomotion.h` | `maximum_yaw_acceleration_` | `0.8 rad/s²` | 未覆盖 | 自转角速度的斜坡加速度，降低后启动和停止更柔和。 |
 | `mit_robot/src/MPC/ConvexMPCLocomotion.cpp` | 平面速度范围 | — | 二维模长 `≤1 m/s` | 同时约束前后和左右速度。 |
@@ -46,12 +51,12 @@
 | `mit_robot/src/MPC/ConvexMPCLocomotion.cpp` | MPC TROT 相位偏移 | `{0, H/2, H/2, 0}` | `{0, 5, 5, 0}` | 腿序为 FR、FL、RR、RL。 |
 | `mit_robot/src/MPC/ConvexMPCLocomotion.cpp` | MPC TROT 支撑时长 | `3H/5` | `6/10` 段（60%） | 与 `GaitScheduler` 的 `TROT_WALK` 保持一致。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `horizon` | `10` 段 | 未覆盖 | 预测段数。 |
-| `mit_robot/include/MPC/SolverMPC.h` | `time_step` | `0.03 s` | 未覆盖 | 单段预测时间；总预测时域为 `10 × 0.03 = 0.30 s`，它不同于 20 Hz 求解周期。 |
+| `mit_robot/include/MPC/SolverMPC.h` | `time_step` | `0.03 s` | 未覆盖 | 单段预测时间；总预测时域为 `10 × 0.03 = 0.30 s`，它不同于 25 Hz 基础求解周期。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `friction_coefficient` | `0.4` | 未覆盖 | MPC 摩擦锥系数，属于控制器约束，不是模型质量参数。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `minimum_normal_force` | `0 N` | 未覆盖 | 支撑脚法向力下界。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `maximum_normal_force` | `120 N` | 未覆盖 | MPC 单脚法向力上界。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `force_regularization` | `1e-5` | 未覆盖 | 力正则权重/数值稳定项。 |
-| `mit_robot/include/MPC/SolverMPC.h` | `maximum_iterations` | `60` | 未覆盖 | 由100温和降低；只减少20 Hz MPC单次最坏计算量，不降低500 Hz WBC/电机闭环频率。 |
+| `mit_robot/include/MPC/SolverMPC.h` | `maximum_iterations` | `75` | 未覆盖 | 从60温和提高，增加25 Hz MPC单次求解余量，不降低500 Hz WBC/电机闭环频率。 |
 | `mit_robot/include/MPC/SolverMPC.h` | `convergence_tolerance` | `1e-5` | 未覆盖 | 无穷范数残差收敛阈值。 |
 | `mit_robot/src/MPC/SolverMPC.cpp` | 状态跟踪权重 | — | `{20,20,10, 2,2,50, 0.2,0.2,0.2, 1,1,2}` | 顺序为 `roll,pitch,yaw,x,y,z,roll_rate,pitch_rate,yaw_rate,vx,vy,vz`。 |
 | `mit_robot/src/MPC/SolverMPC.cpp` | 欧拉角奇异阈值 | — | `1e-4` | `abs(cos(pitch))` 小于该值时拒绝求解。 |
@@ -157,6 +162,6 @@
 
 1. 入口目标（`user/main.cpp`、UI、ROS 2）先写入 `RobotRunner`。
 2. `RobotRunner` 的 500 Hz 控制周期运行状态估计、FSM 和 WBC。
-3. Locomotion 状态把 MPC 刷新周期覆盖为 0.05 s，因此求解器以 20 Hz 刷新，其他周期复用接触力。
+3. Locomotion 状态把 MPC 刷新周期设为 0.04 s，因此求解器以 25 Hz 基础频率刷新；步态仍按独立的 0.05 s 分段推进，接触切换时立即补算。
 4. WBC 头文件里的默认 PD 会被具体 FSM 状态覆盖；调行走必须修改 Locomotion 的最终值，调站立必须修改 BalanceStand 的最终值。
 5. 仿真执行端最终使用 `前馈力矩 + Kp(q_des-q) + Kd(qd_des-qd)`，MuJoCo XML 的位置伺服器在当前桥接方式下没有位置误差。

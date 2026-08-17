@@ -43,6 +43,7 @@ add_robot_unit_test(test_wbc_optimization wbc/whole_body_optimization_test.cpp)
 add_robot_unit_test(test_wbc_controller wbc/wbc_controller_test.cpp)
 add_robot_unit_test(test_fsm_control fsm/control_fsm_test.cpp)
 add_robot_unit_test(test_fsm_locomotion fsm/locomotion_state_test.cpp)
+add_robot_unit_test(test_fsm_front_jump fsm/front_jump_test.cpp)
 add_robot_unit_test(test_fsm_recovery fsm/recovery_stand_test.cpp)
 add_robot_unit_test(test_fsm_safety fsm/safety_checker_test.cpp)
 

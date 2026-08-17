@@ -13,6 +13,8 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile, ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
+# 通过 ros2_control 启动标准 ROS 2 控制链，原生工程控制器保持独立。
+
 
 def launch_setup(context, *args, **kwargs):
     """通过 mujoco_ros2_control 加载未改动的 Menagerie GO1 MJCF."""
@@ -80,6 +82,7 @@ def launch_setup(context, *args, **kwargs):
 
 
 def generate_launch_description():
+    # headless 参数控制 MuJoCo 是否打开原生渲染窗口。
     return LaunchDescription([
         DeclareLaunchArgument(
             "headless",

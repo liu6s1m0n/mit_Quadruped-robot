@@ -75,6 +75,7 @@ add_library(mymit_robot_model
   src/QuadProg++.cc
   src/FSM/ControlFSM.cpp
   src/FSM/FSM_State_BalanceStand.cpp
+  src/FSM/FSM_State_FrontJump.cpp
   src/FSM/FSM_State_Locomotion.cpp
   src/FSM/FSM_State_Passive.cpp
   src/FSM/FSM_State_RecoveryStand.cpp

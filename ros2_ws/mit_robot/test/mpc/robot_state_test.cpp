@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+// 验证 MPC 状态映射将机身角速度正确转换为 RPY 角速度，而不是简单旋转向量。
+
 #include "MPC/RobotState.h"
 #include "mpc_test_support.hpp"
 
@@ -8,6 +10,7 @@ namespace
 
 TEST(MpcRobotState, MapsBodyAngularVelocityToRpyRate)
 {
+  // 采用非零 roll、pitch、yaw 检查欧拉角速率映射中的姿态耦合项。
   StateEstimate<double> estimate;
   estimate.rpy << 0.31, -0.22, 0.47;
   estimate.orientation_world_from_body =
@@ -34,6 +37,7 @@ TEST(MpcRobotState, MapsBodyAngularVelocityToRpyRate)
     std::asin(-rotation(2, 0)),
     std::atan2(rotation(1, 0), rotation(0, 0));
   const Vec3<double> numerical_rate = (advanced_rpy - estimate.rpy) / dt;
+  // 用小时间步数值微分作为参考，并排除错误的 R*omega 直接映射。
   EXPECT_TRUE(state.rpy_rate.isApprox(numerical_rate, 1.0e-7));
   EXPECT_FALSE(
     state.rpy_rate.isApprox(

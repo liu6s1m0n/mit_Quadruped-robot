@@ -4,6 +4,8 @@ from launch import LaunchDescription
 from launch.actions import Shutdown
 from launch_ros.actions import Node
 
+# 启动高度服务和工程自带仿真控制程序；控制程序退出时关闭服务节点。
+
 
 def generate_launch_description():
     # 高度服务通过本地 IPC 把 ROS 2 请求转交给仿真进程；仿真退出时关闭整组节点。

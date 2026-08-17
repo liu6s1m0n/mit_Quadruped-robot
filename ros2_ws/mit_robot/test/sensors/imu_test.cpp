@@ -57,6 +57,7 @@ TEST(ImuTest, SimImuReadsMujocoSensorData)
   const auto sample = imu.read();
 
   EXPECT_TRUE(sample.valid);
+  EXPECT_TRUE(sample.orientation_valid);
   EXPECT_DOUBLE_EQ(sample.orientation_world_from_body.w(), 1.0);
   EXPECT_TRUE(sample.angular_velocity_body.isApprox(Vec3<float>(1.0, 2.0, 3.0)));
   EXPECT_TRUE(sample.acceleration_body.isApprox(Vec3<float>(4.0, 5.0, 6.0)));
@@ -92,14 +93,24 @@ TEST(ImuTest, SimImuRejectsMissingSensors)
     std::invalid_argument);
 }
 
-TEST(ImuTest, HardwareImuIsPlaceholderReturningInvalidData)
+TEST(ImuTest, HardwareImuAcceptsRawGyroAndAccelerometerData)
 {
   HardwareImu imu;
+  EXPECT_FALSE(imu.read().valid);
+
+  ImuData<float> input;
+  input.orientation_valid = false;
+  input.angular_velocity_body << 0.1F, 0.2F, 0.3F;
+  input.acceleration_body << 0.0F, 0.0F, 9.81F;
+  input.timestamp = 1.0F;
+  input.valid = true;
+  ASSERT_TRUE(imu.update(input));
   const auto sample = imu.read();
 
-  // 硬件尚未实现，必须返回无效数据，且保存到成员 imu 中
-  EXPECT_FALSE(sample.valid);
-  EXPECT_FALSE(imu.imu.valid);
+  EXPECT_TRUE(sample.valid);
+  EXPECT_FALSE(sample.orientation_valid);
+  EXPECT_TRUE(sample.angular_velocity_body.isApprox(input.angular_velocity_body));
+  EXPECT_TRUE(sample.acceleration_body.isApprox(input.acceleration_body));
 }
 
 TEST(ImuTest, FactorySelectsBetweenSimulatorAndHardware)
@@ -114,8 +125,35 @@ TEST(ImuTest, FactorySelectsBetweenSimulatorAndHardware)
   mj_forward(model.get(), data.get());
   EXPECT_TRUE(sim->read().valid);
 
-  // 硬件来源：当前为占位实现，返回无效数据
+  // 硬件来源：没有驱动注入数据前保持无效。
   auto hw = makeImu(ImuSource::HARDWARE, nullptr, nullptr);
   ASSERT_NE(hw, nullptr);
   EXPECT_FALSE(hw->read().valid);
+}
+
+TEST(ImuTest, HardwareImuConvertsDirectRpyWithoutIntegration)
+{
+  HardwareImu imu;
+  HardwareImuMeasurement measurement;
+  measurement.rpy_world_from_body << 0.1F, -0.2F, 0.3F;
+  measurement.angular_velocity_body << 5.0F, 6.0F, 7.0F;
+  measurement.angular_acceleration_body << 0.4F, 0.5F, 0.6F;
+  measurement.timestamp = 2.0F;
+  measurement.valid = true;
+
+  ASSERT_TRUE(imu.update(measurement));
+  const auto sample = imu.read();
+  EXPECT_TRUE(sample.valid);
+  EXPECT_TRUE(sample.orientation_valid);
+  EXPECT_FALSE(sample.acceleration_valid);
+  EXPECT_TRUE(sample.angular_acceleration_valid);
+  EXPECT_TRUE(
+    sample.angular_acceleration_body.isApprox(
+      measurement.angular_acceleration_body));
+
+  const Mat3<float> rotation = sample.orientation_world_from_body.toRotationMatrix();
+  const float pitch = std::asin(std::clamp(-rotation(2, 0), -1.0F, 1.0F));
+  EXPECT_NEAR(std::atan2(rotation(2, 1), rotation(2, 2)), 0.1F, 1e-5F);
+  EXPECT_NEAR(pitch, -0.2F, 1e-5F);
+  EXPECT_NEAR(std::atan2(rotation(1, 0), rotation(0, 0)), 0.3F, 1e-5F);
 }

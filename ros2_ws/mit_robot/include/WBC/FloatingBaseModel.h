@@ -31,8 +31,12 @@ using std::vector;
 using namespace ori;
 using namespace spatial;
 
-/*!
- * 浮动基座模型的状态，包含基座状态和关节状态。
+/**
+ * @brief 浮动基座模型状态，包含基座和关节状态。
+ *
+ * 基座姿态使用四元数表示，基座速度使用 6 维空间速度表示；q 和 qd
+ * 只保存各可动关节的角度与速度，不包含浮动基座的 6 个自由度。
+ * @tparam T 标量类型。
  */
 template < typename T >
 struct FBModelState
@@ -54,8 +58,12 @@ struct FBModelState
   }
 };
 
-/*!
- * 对刚体浮动基座模型运行关节体算法（ABA）得到的状态导数。
+/**
+ * @brief 浮动基座模型状态导数。
+ *
+ * 该结构保存 ABA 或逆动力学计算产生的基座位置导数、基座空间加速度
+ * 和关节加速度。
+ * @tparam T 标量类型。
  */
 template < typename T >
 struct FBModelStateDerivative
@@ -66,27 +74,54 @@ struct FBModelStateDerivative
   DVec < T > qdd;               // 关节加速度（12维）
 };
 
-/*!
- * 表示带有转子和地面接触点的浮动基座刚体模型。
- * 模型结构与状态数据分离，状态通过 setState() 更新。
+/**
+ * @brief 带转子和地面接触点的浮动基座刚体模型。
+ *
+ * 模型采用 Featherstone 刚体动力学的树结构：前 6 个广义自由度属于
+ * 浮动基座，其余每个刚体通常对应一个一自由度关节。模型结构与状态数据
+ * 分离，状态通过 setState() 更新；质量矩阵、重力、科里奥利项和雅可比
+ * 等结果使用缓存标志避免重复计算。
+ *
+ * @tparam T 标量类型，通常为 float 或 double。
  */
 template < typename T >
 class FloatingBaseModel {
 public:
-  /*!
-   * 使用默认重力加速度初始化浮动基座模型。
-   */
+  /** @brief 使用默认重力加速度 (0, 0, -9.81) 初始化模型。 */
   FloatingBaseModel() : _gravity(0, 0, -9.81) {
   }
-  ~FloatingBaseModel() {
-  }
+  /** @brief 析构函数。 */
+  ~FloatingBaseModel() = default;
 
+  /** @brief 添加带空间惯量的浮动基座。 */
   void addBase(const SpatialInertia < T > & inertia);
+  /** @brief 根据质量、质心和转动惯量添加浮动基座。 */
   void addBase(T mass, const Vec3 < T > & com, const Mat3 < T > & I);
+  /**
+   * @brief 添加一个地面接触点。
+   * @param bodyID 接触点所属刚体编号。
+   * @param location 接触点在刚体坐标系中的位置。
+   * @param isFoot 是否将该点加入足端索引列表。
+   * @return 新接触点编号。
+   */
   int addGroundContactPoint(
     int bodyID, const Vec3 < T > & location,
     bool isFoot = false);
+  /** @brief 按长方体八个顶点添加地面接触点。 */
   void addGroundContactBoxPoints(int bodyId, const Vec3 < T > & dims);
+  /**
+   * @brief 添加带转子的刚体和一自由度关节。
+   * @param inertia 刚体空间惯量。
+   * @param rotorInertia 转子空间惯量。
+   * @param gearRatio 刚体与转子的传动比。
+   * @param parent 父刚体编号。
+   * @param jointType 关节类型。
+   * @param jointAxis 关节轴。
+   * @param Xtree 父刚体到刚体的空间变换。
+   * @param Xrot 父刚体到转子的空间变换。
+   * @return 新刚体编号。
+   */
+  /** @brief 使用 MassProperties 版本的 addBody()。 */
   int addBody(
     const SpatialInertia < T > & inertia,
     const SpatialInertia < T > & rotorInertia, T gearRatio, int parent,
@@ -97,19 +132,31 @@ public:
     const MassProperties < T > & rotorInertia, T gearRatio, int parent,
     JointType jointType, CoordinateAxis jointAxis,
     const Mat6 < T > & Xtree, const Mat6 < T > & Xrot);
-  /** Add a body when the model supplies joint-side armature directly. */
+  /**
+   * @brief 添加直接给定关节侧转动惯量的刚体。
+   * @param jointArmature 关节侧转动惯量，必须为有限非负值。
+   * @param bodyName 刚体名称。
+   */
   int addBody(
     const SpatialInertia < T > & inertia, T jointArmature, int parent,
     JointType jointType, CoordinateAxis jointAxis,
     const Mat6 < T > & Xtree, const std::string & bodyName = {});
+  /** @brief 检查模型数组尺寸、父子顺序和浮动基座结构是否一致。 */
   void check();
+  /** @brief 返回所有转子质量之和。 */
   T totalRotorMass() const;
+  /** @brief 返回所有非转子刚体质量之和。 */
   T totalNonRotorMass() const;
 
+  /** @brief 返回广义自由度数，包含浮动基座 6 维。 */
   size_t getNumDof() const noexcept {return _nDof;}
+  /** @brief 返回可驱动关节自由度数。 */
   size_t getNumActuatedDof() const noexcept {return _nDof >= 6 ? _nDof - 6 : 0;}
+  /** @brief 返回地面接触点数量。 */
   size_t getNumGroundContacts() const noexcept {return _nGroundContact;}
+  /** @brief 返回当前模型状态。 */
   const FBModelState<T> & getState() const noexcept {return _state;}
+  /** @brief 返回足端接触点在全部接触点中的索引。 */
   const std::vector < uint64_t > & getFootIndices() const noexcept {return _footIndicesGC;}
   const std::vector < size_t > & getGroundContactParents() const noexcept {return _gcParent;}
   const std::vector < Vec3 < T >> & getGroundContactLocations() const noexcept {return _gcLocation;}
@@ -165,11 +212,24 @@ public:
     _compute_contact_info.at(gc_index) = flag;
   }
 
+  /**
+   * @brief 计算多个接触方向的逆接触惯量。
+   * @param gc_index 接触点编号。
+   * @param force_directions 接触力方向矩阵。
+   * @return 接触惯量逆矩阵，数学上为 @f$J_cH^{-1}J_c^T@f$ 的方向投影。
+   */
   DMat < T > invContactInertia(
     const int gc_index,
     const D6Mat < T > &force_directions);
   T invContactInertia(const int gc_index, const Vec3 < T > & force_ics_at_contact);
 
+  /**
+   * @brief 在接触点施加单位测试力并计算逆接触惯量。
+   * @param gc_index 接触点编号。
+   * @param force_ics_at_contact 惯性坐标系中的测试力。
+   * @param dstate_out 输出状态导数。
+   * @return 标量逆接触惯量。
+   */
   T applyTestForce(
     const int gc_index, const Vec3 < T > & force_ics_at_contact,
     FBModelStateDerivative < T > & dstate_out);
@@ -178,8 +238,10 @@ public:
     const int gc_index, const Vec3 < T > & force_ics_at_contact,
     DVec < T > & dstate_out);
 
+  /** @brief 为新增的基座或关节分配动力学递推变量。 */
   void addDynamicsVars(int count);
 
+  /** @brief 根据当前自由度数重新调整系统矩阵和接触雅可比尺寸。 */
   void resizeSystemMatricies();
 
   /*!
@@ -238,40 +300,51 @@ public:
     _accelerationsUpToDate = false;
   }
 
+  /** @brief 获取刚体局部点在世界坐标系中的位置。 */
   Vec3 < T > getPosition(const int link_idx, const Vec3 < T > &local_pos);
+  /** @brief 获取刚体原点在世界坐标系中的位置。 */
   Vec3 < T > getPosition(const int link_idx);
 
 
+  /** @brief 获取刚体相对世界坐标系的旋转矩阵。 */
   Mat3 < T > getOrientation(const int link_idx);
+  /** @brief 获取刚体指定点的线速度。 */
   Vec3 < T > getLinearVelocity(const int link_idx, const Vec3 < T > &point);
   Vec3 < T > getLinearVelocity(const int link_idx);
 
+  /** @brief 获取刚体指定点的线加速度。 */
   Vec3 < T > getLinearAcceleration(const int link_idx, const Vec3 < T > &point);
   Vec3 < T > getLinearAcceleration(const int link_idx);
 
+  /** @brief 获取刚体角速度。 */
   Vec3 < T > getAngularVelocity(const int link_idx);
+  /** @brief 获取刚体角加速度。 */
   Vec3 < T > getAngularAcceleration(const int link_idx);
-  // 正向运动学
+  /** @brief 执行正向运动学并更新各刚体位姿、速度缓存。 */
   void forwardKinematics();
 
+  /** @brief 计算重力和科里奥利/离心项对应的偏置加速度。 */
   void biasAccelerations();
+  /** @brief 递归合成各子树的等效空间惯量。 */
   void compositeInertias();
+  /** @brief 执行正向加速度递推。 */
   void forwardAccelerationKinematics();
+  /** @brief 计算所有启用接触点的三维接触雅可比。 */
   void contactJacobians();
 
-  // 重力项
+  /** @brief 返回广义重力力向量 @f$G(q)@f$。 */
   DVec < T > generalizedGravityForce();
 
-  // 科里奥利力/离心力
+  /** @brief 返回广义科里奥利/离心力向量 @f$C(q,\dot q)@f$。 */
   DVec < T > generalizedCoriolisForce();
 
-  // 质量矩阵
+  /** @brief 返回广义质量矩阵 @f$H(q)@f$。 */
   DMat < T > massMatrix();
 
-  // 逆动力学：由加速度求力矩
+  /** @brief 根据状态导数执行逆动力学，计算广义力。 */
   DVec < T > inverseDynamics(const FBModelStateDerivative < T > &dState);
 
-  // 正动力学：由力矩求加速度
+  /** @brief 根据广义力执行 ABA 正动力学，输出状态导数。 */
   void runABA(const DVec < T > & tau, FBModelStateDerivative < T > & dstate);
 
   size_t _nDof = 0;

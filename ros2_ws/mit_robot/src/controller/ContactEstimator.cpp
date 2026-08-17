@@ -139,6 +139,8 @@ bool ContactEstimator<T>::run()
 
   const bool imu_valid =
       raw_imu.valid &&
+      raw_imu.orientation_valid &&
+      raw_imu.acceleration_valid &&
       raw_imu.orientation_world_from_body.coeffs().allFinite() &&
       raw_imu.acceleration_body.allFinite() &&
       std::isfinite(raw_imu.timestamp);
@@ -213,11 +215,12 @@ bool ContactEstimator<T>::estimateLegContact(
 
   // 由关节力矩反推足端力：tau = J^T * F。直接计算 J^{-T} 会在腿接近
   // 伸直的奇异位形放大测量噪声，因此求解带阻尼的最小二乘问题：
-  // (J*J^T + lambda^2*I) * F = J*tau。
+  // (J*J^T + lambda^2*I) * F = J*tau。 damping_squared = λ^2
   const T damping_squared =
       parameters_.force_estimation_damping * parameters_.force_estimation_damping;
   const Mat3<T> normal_matrix =
       jacobian * jacobian.transpose() + damping_squared * Mat3<T>::Identity();
+  //优化过的求逆算法
   Eigen::LDLT<Mat3<T>> solver(normal_matrix);
   if (solver.info() != Eigen::Success)
   {
@@ -228,7 +231,7 @@ bool ContactEstimator<T>::estimateLegContact(
     contact.valid = false;
     return false;
   }
-
+  //Jτ
   const Vec3<T> foot_force_body =
       solver.solve(jacobian * state.torque_estimate);
   const Vec3<T> foot_force_world = rotation_world_from_body * foot_force_body;

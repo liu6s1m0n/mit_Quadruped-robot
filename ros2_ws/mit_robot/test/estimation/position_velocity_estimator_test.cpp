@@ -51,6 +51,7 @@ struct SensorFixture
       FakeLeg(LegId::RR), FakeLeg(LegId::RL)}
   {
     imu.sample.orientation_world_from_body = Eigen::Quaternionf::Identity();
+    imu.sample.orientation_valid = true;
     imu.sample.angular_velocity_body.setZero();
     imu.sample.acceleration_body << 0.0F, 0.0F, 9.81F;
     imu.sample.timestamp = 1.0F;
@@ -110,6 +111,45 @@ TEST(PositionVelocityEstimatorTest, InitializesStandingHeightFromLegKinematics)
   for (const auto & leg : fixture.legs) {
     EXPECT_EQ(leg.read_count, 1);
   }
+}
+
+TEST(PositionVelocityEstimatorTest, HardwareSensorsRunWithoutAbsoluteOrientation)
+{
+  const auto quadruped = makeQuadruped<float>(RobotType::UNITREE_GO1);
+  HardwareImu imu;
+  ImuData<float> imu_sample;
+  imu_sample.orientation_valid = false;
+  imu_sample.angular_velocity_body.setZero();
+  imu_sample.acceleration_body << 0.0F, 0.0F, 9.81F;
+  imu_sample.timestamp = 1.0F;
+  imu_sample.valid = true;
+  ASSERT_TRUE(imu.update(imu_sample));
+
+  std::array<HardwareLeg, kNumLegs> legs{
+    HardwareLeg(LegId::FR), HardwareLeg(LegId::FL),
+    HardwareLeg(LegId::RR), HardwareLeg(LegId::RL)};
+  PositionVelocityEstimator<float>::LegSensors leg_pointers{};
+  for (std::size_t index = 0; index < kNumLegs; ++index) {
+    const LegId leg_id = static_cast<LegId>(index);
+    JointState<float> joint_sample;
+    joint_sample.leg = leg_id;
+    joint_sample.position = quadruped.leg(leg_id).joints.home_position;
+    joint_sample.velocity.setZero();
+    joint_sample.torque_estimate.setZero();
+    joint_sample.timestamp = 1.0F;
+    joint_sample.valid = true;
+    ASSERT_TRUE(legs[index].update(joint_sample));
+    leg_pointers[index] = &legs[index];
+  }
+
+  PositionVelocityEstimator<float> estimator(
+    quadruped, imu, leg_pointers, OrientationEstimatorMode::IMU_FUSION);
+  ASSERT_TRUE(estimator.run());
+  EXPECT_TRUE(estimator.result().valid);
+  EXPECT_NEAR(estimator.result().rpy.x(), 0.0F, 1e-5F);
+  EXPECT_NEAR(estimator.result().rpy.y(), 0.0F, 1e-5F);
+  EXPECT_NEAR(estimator.result().rpy.z(), 0.0F, 1e-5F);
+  EXPECT_GT(estimator.result().position_world.z(), 0.0F);
 }
 
 TEST(PositionVelocityEstimatorTest, KeepsStaticStandingRobotStable)

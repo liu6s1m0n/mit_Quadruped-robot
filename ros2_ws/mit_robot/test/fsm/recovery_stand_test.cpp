@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+// 验证机器人倒地后的收腿、恢复站立轨迹以及关节目标限位。
+
 #include "FSM/FSM_State_RecoveryStand.h"
 #include "fsm_test_support.hpp"
 
@@ -8,6 +10,7 @@ namespace
 
 TEST(RecoveryStandTest, ProducesRateIndependentCommandsWithinModelLimits)
 {
+  // 低机身高度表示需要执行恢复流程，而不是直接站起。
   test_support::FsmContext context(0.01F);
   ASSERT_TRUE(context.initialized);
   context.estimate.position_world.z() = 0.05F;
@@ -35,6 +38,7 @@ TEST(RecoveryStandTest, ProducesRateIndependentCommandsWithinModelLimits)
   }
 
   context.estimate.position_world.z() = 0.27F;
+  // 恢复过程完成后提供正常站立高度，状态应回到 BalanceStand。
   for (std::size_t iteration = 0; iteration < 140 + 51; ++iteration) {
     recovery.run();
   }

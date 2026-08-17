@@ -92,6 +92,11 @@ FSM_StateName FSM_State_StandUp<T>::checkTransition()
       case ControlMode::RecoveryStand:
         this->nextStateName = FSM_StateName::RECOVERY_STAND;
         break;
+      case ControlMode::FrontJump:
+        // 起立动作未完成时不允许直接起跳。
+        this->_data->desired_state->mode = ControlMode::BalanceStand;
+        this->nextStateName = FSM_StateName::BALANCE_STAND;
+        break;
     }
   }
   this->transitionDuration = T(0);

@@ -49,6 +49,11 @@ FSM_StateName FSM_State_Passive<T>::checkTransition()
     case ControlMode::RecoveryStand:
       this->nextStateName = FSM_StateName::RECOVERY_STAND;
       break;
+    case ControlMode::FrontJump:
+      // 未主动站立时拒绝跳跃请求。
+      this->_data->desired_state->mode = ControlMode::Passive;
+      this->nextStateName = FSM_StateName::PASSIVE;
+      break;
   }
   this->transitionDuration = T(0);
   return this->nextStateName;

@@ -14,6 +14,7 @@
 
 #include "FSM/FSM_State.h"
 #include "FSM/FSM_State_BalanceStand.h"
+#include "FSM/FSM_State_FrontJump.h"
 #include "FSM/FSM_State_Locomotion.h"
 #include "FSM/FSM_State_Passive.h"
 #include "FSM/FSM_State_RecoveryStand.h"
@@ -39,6 +40,7 @@ struct FSM_StatesList
   std::unique_ptr < FSM_State_RecoveryStand < T >> recovery_stand;
   std::unique_ptr < FSM_State_BalanceStand < T >> balance_stand;
   std::unique_ptr < FSM_State_Locomotion < T >> locomotion;
+  std::unique_ptr < FSM_State_FrontJump < T >> front_jump;
 };
 
 /*这是最高层的状态机。*/

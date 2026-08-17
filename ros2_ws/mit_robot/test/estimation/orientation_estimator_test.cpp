@@ -47,6 +47,7 @@ struct SensorFixture
       FakeLeg(LegId::RR), FakeLeg(LegId::RL)}
   {
     imu.sample.orientation_world_from_body = Eigen::Quaternionf::Identity();
+    imu.sample.orientation_valid = true;
     imu.sample.angular_velocity_body << 0.1F, 0.2F, 0.3F;
     imu.sample.acceleration_body << 1.0F, 2.0F, 3.0F;
     imu.sample.timestamp = 1.0F;
@@ -230,4 +231,64 @@ TEST(OrientationEstimatorTest, ImuFusionRejectsDegenerateDeviceOrientation)
 
   EXPECT_FALSE(estimator.run());
   EXPECT_FALSE(estimator.result().valid);
+}
+
+TEST(OrientationEstimatorTest, ImuFusionWorksWithoutAbsoluteOrientation)
+{
+  SensorFixture fixture;
+  fixture.imu.sample.orientation_valid = false;
+  fixture.imu.sample.angular_velocity_body.setZero();
+  fixture.imu.sample.acceleration_body << 0.0F, 0.0F, 9.81F;
+  OrientationEstimator<float> estimator(
+    fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::IMU_FUSION, 0.02F, 2.0F, 10.0F);
+
+  ASSERT_TRUE(estimator.run());
+  EXPECT_NEAR(estimator.result().rpy.x(), 0.0F, kTolerance);
+  EXPECT_NEAR(estimator.result().rpy.y(), 0.0F, kTolerance);
+  EXPECT_NEAR(estimator.result().rpy.z(), 0.0F, kTolerance);
+
+  fixture.imu.sample.angular_velocity_body << 0.0F, 0.0F, 1.0F;
+  fixture.imu.sample.timestamp = 1.01F;
+  for (auto & leg : fixture.legs) {
+    leg.sample.timestamp = 1.01F;
+  }
+  ASSERT_TRUE(estimator.run());
+  EXPECT_NEAR(estimator.result().rpy.z(), 0.01F, 1e-4F);
+}
+
+TEST(OrientationEstimatorTest, SimulationTruthRequiresAbsoluteOrientation)
+{
+  SensorFixture fixture;
+  fixture.imu.sample.orientation_valid = false;
+  OrientationEstimator<float> estimator(
+    fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::SIMULATION_TRUTH);
+
+  EXPECT_FALSE(estimator.run());
+  EXPECT_FALSE(estimator.result().valid);
+}
+
+TEST(OrientationEstimatorTest, HardwareDirectUsesAnglesWithoutGyroIntegration)
+{
+  SensorFixture fixture;
+  fixture.imu.sample.orientation_world_from_body = Eigen::Quaternionf(
+    Eigen::AngleAxisf(0.4F, Vec3<float>::UnitZ()));
+  fixture.imu.sample.angular_velocity_body << 0.0F, 0.0F, 50.0F;
+  OrientationEstimator<float> estimator(
+    fixture.imu, fixture.legPointers(),
+    OrientationEstimatorMode::HARDWARE_DIRECT);
+
+  ASSERT_TRUE(estimator.run());
+  EXPECT_NEAR(estimator.result().rpy.z(), 0.4F, 1e-5F);
+
+  fixture.imu.sample.timestamp = 1.05F;
+  fixture.imu.sample.orientation_world_from_body = Eigen::Quaternionf(
+    Eigen::AngleAxisf(0.6F, Vec3<float>::UnitZ()));
+  for (auto & leg : fixture.legs) {
+    leg.sample.timestamp = 1.05F;
+  }
+  ASSERT_TRUE(estimator.run());
+  // 即使角速度极大，输出也严格采用设备本帧角度 0.6，而不是积分到 2.9 rad。
+  EXPECT_NEAR(estimator.result().rpy.z(), 0.6F, 1e-5F);
 }

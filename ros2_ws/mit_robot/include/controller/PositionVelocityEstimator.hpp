@@ -103,12 +103,15 @@ public:
   }
 
 private:
-  using StateVector = Eigen::Matrix<T, 18, 1>;
-  using ObservationVector = Eigen::Matrix<T, 28, 1>;
-  using StateMatrix = Eigen::Matrix<T, 18, 18>;
-  using InputMatrix = Eigen::Matrix<T, 18, 3>;
-  using ObservationMatrix = Eigen::Matrix<T, 28, 18>;
-  using ObservationCovariance = Eigen::Matrix<T, 28, 28>;
+  using StateVector = Eigen::Matrix<T, 18, 1>;  ///< 18 维状态向量
+  /*   4条腿相对位置：12维
+       4条腿速度约束：12维
+       4条腿足端高度：4维*/
+  using ObservationVector = Eigen::Matrix<T, 28, 1>; ///< 28 维观测向量
+  using StateMatrix = Eigen::Matrix<T, 18, 18>;  ///< 18x18 状态转移矩阵
+  using InputMatrix = Eigen::Matrix<T, 18, 3>;   ///< 加速度输入矩阵
+  using ObservationMatrix = Eigen::Matrix<T, 28, 18>; ///< 观测矩阵
+  using ObservationCovariance = Eigen::Matrix<T, 28, 28>; ///<观测噪声和创新协方差矩阵
 
   /** @brief 构造固定的 28x18 观测矩阵。 */
   void configureObservationMatrix();

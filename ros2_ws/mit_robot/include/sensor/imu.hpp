@@ -17,12 +17,32 @@
 /**
  * @brief IMU 数据来源类型。
  *
- * SIMULATOR：从 MuJoCo 仿真器读取；HARDWARE：从真实硬件读取（尚未实现）。
+ * SIMULATOR：从 MuJoCo 仿真器读取；HARDWARE：接收真实硬件驱动注入的采样。
  */
 enum class ImuSource : std::uint8_t
 {
   SIMULATOR = 0,
   HARDWARE = 1
+};
+
+/**
+ * @brief 硬件 IMU 驱动向控制层提交的直接测量。
+ *
+ * rpy_world_from_body 使用 ZYX 欧拉角约定，顺序为 roll/pitch/yaw，单位 rad。
+ * 角速度和角加速度均在机身坐标系中。部分设备没有线加速度时保持
+ * acceleration_valid=false，不能用角加速度代替线加速度。
+ */
+struct HardwareImuMeasurement
+{
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  Vec3<float> rpy_world_from_body = Vec3<float>::Zero();
+  Vec3<float> angular_velocity_body = Vec3<float>::Zero();
+  Vec3<float> angular_acceleration_body = Vec3<float>::Zero();
+  Vec3<float> acceleration_body = Vec3<float>::Zero();
+  float timestamp = 0.0F;
+  bool acceleration_valid = false;
+  bool valid = false;
 };
 
 /**
@@ -101,15 +121,27 @@ private:
 };
 
 /**
- * @brief 真实硬件 IMU 数据源（占位实现，尚未完成）。
+ * @brief 真实硬件 IMU 数据源的同步注入适配器。
  *
- * 当前 read() 始终返回无效数据（valid == false），避免调用方误用占位值；
- * 接入可输出姿态角和角速度的真实 IMU 后在此实现驱动读取。
+ * 硬件驱动在每个控制周期先调用 update() 注入最新采样，控制管线再通过 read()
+ * 读取。只有陀螺仪和加速度计时允许 orientation_valid=false，IMU_FUSION 会用
+ * 重力方向初始化 roll/pitch，并将启动航向定义为 yaw=0。
  */
 class HardwareImu : public ImuSensor
 {
 public:
   HardwareImu() = default;
+
+  /**
+   * @brief 注入硬件驱动读取的一帧 IMU 数据。
+   * @return 数值有效并已保存时返回 true；无效帧会清空缓存并返回 false。
+   */
+  bool update(const ImuData<float> & sample);
+
+  /**
+   * @brief 注入硬件直接输出的 RPY、角速度和角加速度，不做姿态积分。
+   */
+  bool update(const HardwareImuMeasurement & measurement);
 
   ImuData<float> read() override;
 };

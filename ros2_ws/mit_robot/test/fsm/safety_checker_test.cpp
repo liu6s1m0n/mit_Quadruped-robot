@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+// 验证安全检查器读取当前姿态和控制命令，并对越界值进行拒绝/裁剪。
+
 #include "FSM/SafetyChecker.h"
 #include "fsm_test_support.hpp"
 
@@ -8,6 +10,7 @@ namespace
 
 TEST(SafetyCheckerTest, UsesCurrentModelAndCommandFields)
 {
+  // 先检查姿态阈值，再检查足端位置和前馈力的模型相关限制。
   test_support::FsmContext context(0.001F);
   ASSERT_TRUE(context.initialized);
   auto data = context.data();

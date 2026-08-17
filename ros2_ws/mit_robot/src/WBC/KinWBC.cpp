@@ -1,10 +1,17 @@
+/**
+ * @file KinWBC.cpp
+ * @brief 运动学全身控制器的分层任务和零空间投影实现。
+ */
+
 #include "WBC/KinWBC.hpp"
 #include "Utilities/pseudoInverse.h"
 
 #include <stdexcept>
 
-// 运动学 WBC：在满足接触约束的零空间内，按列表顺序逐级完成各个运动任务。
-// 它只求关节位置/速度参考；动力学一致的力矩由 WBIC 另行计算。
+/**
+ * @brief 构造 KinWBC，并初始化广义空间单位矩阵。
+ * @param num_qdot 广义速度维数。
+ */
 template<typename T>
 KinWBC<T>::KinWBC(std::size_t num_qdot)
 : threshold_(0.001), num_qdot_(num_qdot),
@@ -17,6 +24,12 @@ KinWBC<T>::KinWBC(std::size_t num_qdot)
 }
 
 template<typename T>
+/**
+ * @brief 按接触约束和任务优先级求解关节位置、速度命令。
+ *
+ * 接触约束先形成零空间 @f$N_c@f$，之后每个任务都在前级任务留下的
+ * 零空间中求解。位置使用 @f$J^{\#}e@f$，速度使用 @f$J^{\#}\dot x_d@f$。
+ */
 bool KinWBC<T>::FindConfiguration(
   const DVec<T> & curr_config, const std::vector<Task<T> *> & task_list,
   const std::vector<ContactSpec<T> *> & contact_list, DVec<T> & jpos_cmd,
@@ -121,6 +134,9 @@ bool KinWBC<T>::FindConfiguration(
 }
 
 template<typename T>
+/**
+ * @brief 根据伪逆构造零空间投影 @f$N=I-J^{\#}J@f$。
+ */
 void KinWBC<T>::_BuildProjectionMatrix(const DMat<T> & J, DMat<T> & N)
 {
   // N = I - J#J；任意经过 N 的速度都位于 J 的零空间内。
@@ -130,6 +146,9 @@ void KinWBC<T>::_BuildProjectionMatrix(const DMat<T> & J, DMat<T> & N)
 }
 
 template<typename T>
+/**
+ * @brief 计算带奇异值阈值的 Moore-Penrose 伪逆。
+ */
 void KinWBC<T>::_PseudoInverse(const DMat<T> & J, DMat<T> & Jinv)
 {
   pseudoInverse(J, threshold_, Jinv);

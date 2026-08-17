@@ -85,6 +85,10 @@ FSM_StateName FSM_State_BalanceStand<T>::checkTransition()
       this->nextStateName = FSM_StateName::RECOVERY_STAND;
       this->transitionDuration = T(0);
       break;
+    case ControlMode::FrontJump:
+      this->nextStateName = FSM_StateName::FRONT_JUMP;
+      this->transitionDuration = T(0);
+      break;
   }
   return this->nextStateName;
 }

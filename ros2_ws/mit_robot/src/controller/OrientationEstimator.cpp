@@ -103,9 +103,10 @@ bool OrientationEstimator<T>::run()
   // 全部三类数据，而不是只积分角速度。
   const bool imu_valid =
     raw_imu.valid &&
-    raw_imu.orientation_world_from_body.coeffs().allFinite() &&
     raw_imu.angular_velocity_body.allFinite() &&
-    raw_imu.acceleration_body.allFinite() &&
+    (!raw_imu.acceleration_valid || raw_imu.acceleration_body.allFinite()) &&
+    (!raw_imu.angular_acceleration_valid ||
+    raw_imu.angular_acceleration_body.allFinite()) &&
     std::isfinite(raw_imu.timestamp);
 
   if (!imu_valid) {
@@ -131,6 +132,10 @@ bool OrientationEstimator<T>::run()
       orientation_valid = computeImuFusionOrientation(
         raw_imu, timestamp, orientation);
       break;
+    case OrientationEstimatorMode::HARDWARE_DIRECT:
+      // 硬件已经输出角度，本模式只校验和转换，不对角速度做姿态积分。
+      orientation_valid = readImuOrientation(raw_imu, orientation);
+      break;
     default:
       orientation_valid = false;
       break;
@@ -148,12 +153,25 @@ bool OrientationEstimator<T>::run()
   // 陀螺仪和加速度计测量均表达在机身/IMU 坐标系中。
   estimate.angular_velocity_body =
     raw_imu.angular_velocity_body.template cast<T>();
-  estimate.acceleration_body = raw_imu.acceleration_body.template cast<T>();
+  estimate.acceleration_body.setZero();
+  if (raw_imu.acceleration_valid) {
+    estimate.acceleration_body = raw_imu.acceleration_body.template cast<T>();
+  }
+  estimate.angular_acceleration_body.setZero();
+  if (raw_imu.angular_acceleration_valid) {
+    estimate.angular_acceleration_body =
+      raw_imu.angular_acceleration_body.template cast<T>();
+  }
+  estimate.acceleration_valid = raw_imu.acceleration_valid;
+  estimate.angular_acceleration_valid = raw_imu.angular_acceleration_valid;
 
   // robot_types.hpp 明确规定 rotation_world_from_body 将机身向量旋转到世界系，
   // 因此这里直接左乘 R，而不是沿用旧 Cheetah rBody 语义下的 R.transpose()。
-  estimate.acceleration_world =
-    estimate.rotation_world_from_body * estimate.acceleration_body;
+  estimate.acceleration_world.setZero();
+  if (estimate.acceleration_valid) {
+    estimate.acceleration_world =
+      estimate.rotation_world_from_body * estimate.acceleration_body;
+  }
   estimate.timestamp = timestamp;
 
   // OrientationEstimator 暂不估计机身位置和线速度，这些字段保持默认零值，
@@ -180,6 +198,9 @@ template<typename T>
 bool OrientationEstimator<T>::readImuOrientation(
   const ImuData<float> & imu, Eigen::Quaternion<T> & orientation)
 {
+  if (!imu.orientation_valid) {
+    return false;
+  }
   // 真机姿态角和仿真 FRAMEQUAT 在 ImuData 中统一为机身到世界的四元数。
   const float norm = imu.orientation_world_from_body.norm();
   if (!imu.orientation_world_from_body.coeffs().allFinite() ||
@@ -198,17 +219,29 @@ bool OrientationEstimator<T>::computeImuFusionOrientation(
   Eigen::Quaternion<T> & orientation)
 {
   Eigen::Quaternion<T> imu_orientation;
-  if (!readImuOrientation(imu, imu_orientation)) {
-    return false;
-  }
+  const bool has_absolute_orientation = readImuOrientation(imu, imu_orientation);
 
   const Vec3<T> acceleration_body = imu.acceleration_body.template cast<T>();
   const Vec3<T> angular_velocity_body =
     imu.angular_velocity_body.template cast<T>();
 
   if (!fusion_initialized_) {
-    // 首帧直接以 IMU 内部已解算的绝对姿态初始化，包括可观测的 yaw。
-    integrated_orientation_ = imu_orientation;
+    if (has_absolute_orientation) {
+      // 有设备姿态时保留其绝对 yaw。
+      integrated_orientation_ = imu_orientation;
+    } else {
+      // 只有陀螺仪/加速度计时，静止重力可确定 roll/pitch，但 yaw 不可观测。
+      constexpr T kGravity = T(9.81);
+      const T acceleration_norm = acceleration_body.norm();
+      const bool acceleration_is_gravity =
+        acceleration_norm >= T(0.5) * kGravity &&
+        acceleration_norm <= T(1.5) * kGravity;
+      if (!acceleration_is_gravity || !orientationFromAccelerometer(
+          acceleration_body, T(0), integrated_orientation_))
+      {
+        return false;
+      }
+    }
     last_imu_timestamp_ = timestamp;
     fusion_initialized_ = true;
     orientation = integrated_orientation_;
@@ -222,7 +255,9 @@ bool OrientationEstimator<T>::computeImuFusionOrientation(
   }
   constexpr T kMaximumIntegrationStep = T(0.1);
   if (time_step > kMaximumIntegrationStep) {
-    return false;
+    // 丢帧后重新建立局部姿态参考，避免后续每帧都因 dt 过大而永久失败。
+    fusion_initialized_ = false;
+    return computeImuFusionOrientation(imu, timestamp, orientation);
   }
 
   // 角速度只负责周期内的高频姿态预测。
@@ -241,6 +276,8 @@ bool OrientationEstimator<T>::computeImuFusionOrientation(
   const bool acceleration_is_gravity =
     acceleration_norm >= T(0.5) * kGravity &&
     acceleration_norm <= T(1.5) * kGravity;
+  /*加速度可以计算 roll/pitch，但不能计算 yaw。
+    所以先取当前积分姿态的 yaw，再使用加速度计算新的姿态：*/
   if (acceleration_is_gravity && time_step > T(0)) {
     const T integrated_yaw =
       rotationMatrixToRpy(integrated_orientation_.toRotationMatrix()).z();
@@ -248,8 +285,10 @@ bool OrientationEstimator<T>::computeImuFusionOrientation(
     if (orientationFromAccelerometer(
         acceleration_body, integrated_yaw, acceleration_orientation))
     {
+      /*w_acc = clamp(k_acc · dt, 0, 1)*/
       const T correction_weight = std::clamp(
         accelerometer_correction_gain_ * time_step, T(0), T(1));
+      /*数学上是在两个单位四元数之间做球面插值：*/
       integrated_orientation_ = integrated_orientation_.slerp(
         correction_weight, acceleration_orientation);
       integrated_orientation_.normalize();
@@ -258,7 +297,7 @@ bool OrientationEstimator<T>::computeImuFusionOrientation(
 
   // 在原融合结果上额外加入 IMU 直接姿态角这一层绝对角度约束，
   // 修正 roll/pitch/yaw 的积分漂移，而不删除高频角速度预测。
-  if (time_step > T(0)) {
+  if (has_absolute_orientation && time_step > T(0)) {
     const T correction_weight = std::clamp(
       imu_orientation_correction_gain_ * time_step, T(0), T(1));
     integrated_orientation_ = integrated_orientation_.slerp(
@@ -283,9 +322,11 @@ bool OrientationEstimator<T>::orientationFromAccelerometer(
   {
     return false;
   }
-
+  //归一化加速度向量，得到机身坐标系下的重力方向；roll/pitch 可由此计算。
   const Vec3<T> up_body = acceleration_body / norm;
+  //当机器人绕 x 轴滚转时，重力向量的 y/z 比值发生变化，因此可以得到 roll。
   const T roll = std::atan2(up_body.y(), up_body.z());
+  //这里分母是 y-z 平面内的投影长度。
   const T pitch = std::atan2(
     -up_body.x(),
     std::sqrt(up_body.y() * up_body.y() + up_body.z() * up_body.z()));
@@ -330,6 +371,15 @@ bool OrientationEstimator<T>::readLegs(T imu_timestamp)
 
 // ---------- 旋转矩阵到 RPY ----------
 
+/*  cr​=cos(roll),sr​=sin(roll)
+    cp=cos⁡(pitch),sp=sin⁡(pitch)
+    cy=cos⁡(yaw),sy=sin⁡(yaw)cy​=cos(yaw),sy​=sin(yaw)
+    
+         cy​*cp​   cy*​sp*​sr​−sy*​cr​   cy*​​sp​*​cr​+sy*​​sr​
+    R =  sy*cp​   sy*sp*​sr​+cy*​cr​   sy*​​sp​*​cr​−cy*​​sr​
+         −sp​      cp*​sr​            cp*​​cr​
+    通过这个阵去求解
+    */
 template<typename T>
 Vec3<T> OrientationEstimator<T>::rotationMatrixToRpy(
   const Mat3<T> & rotation)

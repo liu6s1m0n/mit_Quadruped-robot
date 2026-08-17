@@ -117,10 +117,10 @@ private:
 };
 
 /**
- * @brief 真实硬件单腿反馈接口的占位实现。
+ * @brief 真实硬件单腿反馈的同步注入适配器。
  *
- * 接入电机驱动或总线后，在 read() 中填充三个关节的位置、速度、估计力矩和
- * 硬件时间戳。当前返回 valid=false，避免控制器误用零值。
+ * 电机驱动或总线在每个控制周期先调用 update() 注入反馈，控制管线再通过
+ * read() 取得同一格式的 JointState。未收到有效反馈前 read() 返回 valid=false。
  */
 class HardwareLeg : public LegSensor
 {
@@ -132,8 +132,14 @@ public:
   explicit HardwareLeg(LegId leg_id);
 
   /**
+   * @brief 注入当前腿的最新硬件反馈。
+   * @return 腿编号和全部数值有效时返回 true；无效帧会清空缓存。
+   */
+  bool update(const JointState<float> & state);
+
+  /**
    * @brief 读取真实硬件反馈的预留入口。
-   * @return 驱动尚未接入时返回 valid=false 的 JointState<float>。
+   * @return 最近一次 update() 保存的 JointState<float>。
    */
   JointState<float> read() override;
 

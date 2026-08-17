@@ -1,3 +1,8 @@
+/**
+ * @file WBIC.cpp
+ * @brief WBIC 二次规划、动力学约束和关节力矩恢复的实现。sv = [i6,0] sa = [0,in-6]。
+ */
+
 #include "WBC/WBIC.hpp"
 #include <eigen3/Eigen/LU>
 #include <eigen3/Eigen/SVD>
@@ -6,8 +11,12 @@
 #include <exception>
 #include <stdexcept>
 
-// WBIC（全身逆动力学控制）在任务层级结果附近做二次规划，求浮动基座加速度修正
-// 和接触力修正，再通过整机动力学方程得到 12 个关节的前馈力矩。
+/**
+ * @brief 构造 WBIC 并绑定任务、接触列表。
+ * @param num_qdot 广义速度维数。
+ * @param contact_list 接触约束列表。
+ * @param task_list 任务列表。
+ */
 template<typename T>
 WBIC<T>::WBIC(
   size_t num_qdot, const std::vector<ContactSpec<T> *> * contact_list,
@@ -20,26 +29,36 @@ WBIC<T>::WBIC(
   _contact_list = contact_list;
   _task_list = task_list;
   _data = nullptr;
-
+  /*_eye 主要用于构造任务零空间：*/
   _eye = DMat<T>::Identity(WB::num_qdot_, WB::num_qdot_);
   _eye_floating = DMat<T>::Identity(_dim_floating, _dim_floating);
 }
 
 template<typename T>
+/**
+ * @brief 基类兼容入口，调用 makeTorque() 完成一次 WBIC 求解。
+ */
 void WBIC<T>::MakeTorque(DVec<T> & cmd, void * extra_input)
 {
+  /*12个关节总共12维度*/
   cmd = DVec<T>::Zero(WB::num_act_joint_);
   if (extra_input == nullptr) {return;}
   (void)makeTorque(cmd, *static_cast<WBIC_ExtraData<T> *>(extra_input));
 }
 
 template<typename T>
+/**
+ * @brief 清空输出、校验输入并执行一次二次规划。
+ * @return 求解成功且关节力矩有限时返回 true。
+ */
 bool WBIC<T>::makeTorque(DVec<T> & cmd, WBIC_ExtraData<T> & data)
-{
+{ 
+  /*每次求解前清空上一次结果，防止失败时继续使用旧数据。*/
   cmd = DVec<T>::Zero(WB::num_act_joint_);
   data._opt_result.resize(0);
   data._qddot.resize(0);
   data._Fr.resize(0);
+  /*将当前输入输出缓存保存到成员变量中，供其他内部函数使用。*/
   if (!_ValidateInputs(data)) {return false;}
   _data = &data;
   try {
@@ -58,16 +77,22 @@ bool WBIC<T>::makeTorque(DVec<T> & cmd, WBIC_ExtraData<T> & data)
 }
 
 template<typename T>
+/**
+ * @brief 完成一次 WBIC 内部流程：构造接触约束、任务加速度、QP 并恢复力矩。
+ *
+ * 优化变量为 @f$z=[\Delta\ddot q_b,\Delta F]^T@f$；QP 的目标惩罚修正量，
+ * 等式约束保证浮动基座动力学， 不等式约束保证接触反力处于摩擦锥内。
+ */
 bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
 {
 
   // 优化变量 z = [6 维浮动基座加速度修正, 各接触点反力修正]。
   _SetOptimizationSize();
-  _SetCost();
+  _SetCost();  // 构造 QP 代价函数  z为主要惩罚
 
-  DVec<T> qddot_pre;
-  DMat<T> JcBar;
-  DMat<T> Npre;
+  DVec<T> qddot_pre; //任务层最终得到的名义加速度
+  DMat<T> JcBar;// 接触雅可比的加权广义逆
+  DMat<T> Npre; //当前任务之前的零空间投影矩阵
 
   if (_dim_rf > 0) {
     // 合并所有支撑脚的接触雅可比、期望反力和摩擦约束。
@@ -76,6 +101,7 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
     //一个是足端加速度，另一个是由速度形成的向心加速度
     // 先求满足 Jc*qddot + JcDot*qdot = 0 的接触一致加速度。
     _SetInEqualityConstraint();
+    //计算接触雅可比伪逆
     WB::_WeightedInverse(_Jc, WB::Ainv_, JcBar);
     qddot_pre = JcBar * (-_JcDotQdot);
     Npre = _eye - JcBar * _Jc;
