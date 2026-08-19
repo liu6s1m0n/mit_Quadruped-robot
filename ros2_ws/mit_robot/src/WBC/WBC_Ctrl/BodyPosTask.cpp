@@ -26,6 +26,7 @@ bool BodyPosTask<T>::_UpdateCommand(
   const DVec<T> & acceleration_desired)
 {
   if (position_desired == nullptr) {return false;}
+  /*期望得到的机身位置*/
   const auto & desired = *static_cast<const Vec3<T> *>(position_desired);
   const auto & state = _robot_sys->getState();
   if (!desired.allFinite() || !state.bodyPosition.allFinite() ||

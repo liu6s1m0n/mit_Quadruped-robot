@@ -55,12 +55,17 @@ bool KinWBC<T>::FindConfiguration(
   DMat<T> Nc = I_mtx;
   if (!contact_list.empty()) {
     Eigen::Index contact_rows = 0;
+
     std::vector<DMat<T>> jacobians;
     jacobians.reserve(contact_list.size());
+
     for (ContactSpec<T> * contact : contact_list) {
+
       if (contact == nullptr) {return false;}
+
       DMat<T> jacobian;
       contact->getContactJacobian(jacobian);
+
       if (jacobian.cols() != generalized || !jacobian.allFinite()) {return false;}
       contact_rows += jacobian.rows();
       jacobians.push_back(std::move(jacobian));

@@ -1,6 +1,7 @@
 /**
  * @file WBIC.cpp
  * @brief WBIC 二次规划、动力学约束和关节力矩恢复的实现。sv = [i6,0] sa = [0,in-6]。
+ *        难度很大基本上看不懂
  */
 
 #include "WBC/WBIC.hpp"
@@ -104,11 +105,14 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
     //计算接触雅可比伪逆
     WB::_WeightedInverse(_Jc, WB::Ainv_, JcBar);
     qddot_pre = JcBar * (-_JcDotQdot);
+    /*Nc = I - JcBar * _Jc*/
     Npre = _eye - JcBar * _Jc;
     // pretty_print(JcBar, std::cout, "JcBar");
     // pretty_print(_JcDotQdot, std::cout, "JcDotQdot");
     // pretty_print(qddot_pre, std::cout, "qddot 1");
-  } else {
+  }
+  /*没有接触时清空 并且没有需要避让的接触约束，所以零空间为：I*/
+  else {
     qddot_pre = DVec<T>::Zero(WB::num_qdot_);
     Npre = _eye;
   }
@@ -124,28 +128,16 @@ bool WBIC<T>::_MakeTorqueInternal(DVec<T> & cmd)
     task->getTaskJacobian(Jt);
     task->getTaskJacobianDotQdot(JtDotQdot);
     task->getCommand(xddot);
-
+    //这样任务只能利用前面任务没有使用的自由度。
     JtPre = Jt * Npre;
     WB::_WeightedInverse(JtPre, WB::Ainv_, JtBar);
-
+    //更新加速度 更新任务零空间
     qddot_pre += JtBar * (xddot - JtDotQdot - Jt * qddot_pre);
     Npre = Npre * (_eye - JtBar * JtPre);
-
-    // pretty_print(xddot, std::cout, "xddot");
-    // pretty_print(JtDotQdot, std::cout, "JtDotQdot");
-    // pretty_print(qddot_pre, std::cout, "qddot 2");
-    // pretty_print(Jt, std::cout, "Jt");
-    // pretty_print(JtPre, std::cout, "JtPre");
-    // pretty_print(JtBar, std::cout, "JtBar");
   }
 
   // 浮动基座没有执行器，其 6 维动力学平衡必须作为等式约束严格满足。
   _SetEqualityConstraint(qddot_pre);
-
-  // printf("G:\n");
-  // std::cout<<G<<std::endl;
-  // printf("g0:\n");
-  // std::cout<<g0<<std::endl;
 
   // QuadProg 的约定为 CE^T z + ce0 = 0，CI^T z + ci0 >= 0。
   const double f = solve_quadprog(G, g0, CE, ce0, CI, ci0, z);
@@ -261,14 +253,17 @@ bool WBIC<T>::_ValidateInputs(const WBIC_ExtraData<T> & data) const
   }
   return true;
 }
-
+/*完全没看懂*/
 template<typename T>
 void WBIC<T>::_SetEqualityConstraint(const DVec<T> & qddot)
 {
   // 取整机动力学的浮动基座 6 行：这部分不能由关节力矩直接补偿。
   if (_dim_rf > 0) {
+    /*取质量矩阵前 6 行、前 6 列：SvAEb
+    其中 \(E_b\) 表示将 6 维浮动基座修正量嵌入完整广义加速度。*/
     _dyn_CE.block(0, 0, _dim_eq_cstr, _dim_floating) =
       WB::A_.block(0, 0, _dim_floating, _dim_floating);
+    /*接触力修正对浮动基座动力学的影响为*/
     _dyn_CE.block(0, _dim_floating, _dim_eq_cstr, _dim_rf) =
       -WB::Sv_ * _Jc.transpose();
     _dyn_ce0 = -WB::Sv_ * (WB::A_ * qddot + WB::cori_ + WB::grav_ -
@@ -289,6 +284,7 @@ void WBIC<T>::_SetEqualityConstraint(const DVec<T> & qddot)
   // pretty_print(_dyn_ce0, std::cout, "WBIC: ce0");
 }
 
+/*完全没看懂*/
 template<typename T>
 void WBIC<T>::_SetInEqualityConstraint()
 {
@@ -359,10 +355,6 @@ void WBIC<T>::_ContactBuilding()
     dim_accumul_rf += dim_new_rf;
     dim_accumul_uf += dim_new_uf;
   }
-  //pretty_print(_Fr_des, std::cout, "[WBIC] Fr des");
-  // pretty_print(_Jc, std::cout, "[WBIC] Jc");
-  // pretty_print(_JcDotQdot, std::cout, "[WBIC] JcDot Qdot");
-  // pretty_print(_Uf, std::cout, "[WBIC] Uf");
 }
 
 template<typename T>
@@ -386,15 +378,6 @@ void WBIC<T>::_GetSolution(const DVec<T> & qddot, DVec<T> & cmd)
   // 广义力前 6 项属于不可驱动基座，只取后 12 项作为关节力矩。
   cmd = tot_tau.tail(WB::num_act_joint_);
 
-  // Torque check
-  // DVec<T> delta_tau = DVec<T>::Zero(WB::num_qdot_);
-  // for(size_t i(0); i<_dim_floating; ++i) delta_tau[i] = z[i];
-  // pretty_print(tot_tau, std::cout, "tot tau original");
-  // tot_tau += delta_tau;
-  // pretty_print(tot_tau, std::cout, "tot tau result");
-  // pretty_print(qddot, std::cout, "qddot");
-  // pretty_print(_data->_Fr, std::cout, "Fr");
-  // pretty_print(_Fr_des, std::cout, "Fr des");
 }
 
 template<typename T>

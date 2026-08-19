@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include "model/robots/dm1.hpp"
 #include "model/robots/unitree_go1.hpp"
 
 template<typename T>
@@ -12,8 +13,7 @@ Quadruped<T> makeQuadruped(RobotType robot_type)
       return robots::unitree_go1::makeModel<T>();
 
     case RobotType::DM_BOT1:
-      // DM_BOT1 已登记型号，但其独立参数文件尚未实现。
-      throw std::invalid_argument("DM_BOT1 model parameters are not implemented yet");
+      return robots::dm1::makeModel<T>();
   }
 
   throw std::invalid_argument("unsupported robot type");

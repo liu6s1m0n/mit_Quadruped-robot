@@ -136,38 +136,35 @@ private:
   /** @brief 当前一次求解所使用的输入输出缓存。 */
   WBIC_ExtraData<T> * _data;
 
-  GolDIdnani::GVect<double> z;
-  // Cost
-  GolDIdnani::GMatr<double> G;
-  GolDIdnani::GVect<double> g0;
+  GolDIdnani::GVect<double> z;   ///< QP 解：[浮动基加速度修正；接触力修正]。
+  GolDIdnani::GMatr<double> G;   ///< QP 二次代价矩阵，使 1/2 z^T G z 最小。
+  GolDIdnani::GVect<double> g0;  ///< QP 线性代价向量；当前问题通常设为零。
 
-  // Equality
-  GolDIdnani::GMatr<double> CE;
-  GolDIdnani::GVect<double> ce0;
+  GolDIdnani::GMatr<double> CE;   ///< 求解器格式的等式矩阵，满足 CE^T z + ce0 = 0。
+  GolDIdnani::GVect<double> ce0;  ///< 等式约束常数项，主要来自浮动基动力学残差。
 
-  // Inequality
-  GolDIdnani::GMatr<double> CI;
-  GolDIdnani::GVect<double> ci0;
+  GolDIdnani::GMatr<double> CI;   ///< 求解器格式的不等式矩阵，满足 CI^T z + ci0 >= 0。
+  GolDIdnani::GVect<double> ci0;  ///< 摩擦锥及法向力上下界的不等式常数项。
 
-  DMat<T> _dyn_CE;
-  DVec<T> _dyn_ce0;
-  DMat<T> _dyn_CI;
-  DVec<T> _dyn_ci0;
+  DMat<T> _dyn_CE;   ///< Eigen 格式的动力学等式系数，转置后复制给 CE。
+  DVec<T> _dyn_ce0;  ///< Eigen 格式的动力学等式残差。
+  DMat<T> _dyn_CI;   ///< Eigen 格式的接触力不等式系数，转置后复制给 CI。
+  DVec<T> _dyn_ci0;  ///< Eigen 格式的接触力不等式余量。
 
-  DMat<T> _eye;
-  DMat<T> _eye_floating;
+  DMat<T> _eye;           ///< num_qdot 维单位阵，用于构造任务零空间投影。
+  DMat<T> _eye_floating;  ///< 6 维单位阵，将浮动基修正嵌入优化变量。
 
-  DMat<T> _S_delta;
-  DMat<T> _Uf;
-  DVec<T> _Uf_ieq_vec;
+  DMat<T> _S_delta;     ///< 从 z 中选择浮动基加速度修正的选择矩阵。
+  DMat<T> _Uf;          ///< 汇总所有接触点摩擦锥/法向力约束的块对角矩阵。
+  DVec<T> _Uf_ieq_vec;  ///< 与 _Uf 配套的接触不等式边界向量。
 
-  DMat<T> _Jc;
-  DVec<T> _JcDotQdot;
-  DVec<T> _Fr_des;
+  DMat<T> _Jc;          ///< 堆叠后的总接触雅可比，行数等于 _dim_rf。
+  DVec<T> _JcDotQdot;   ///< 接触雅可比变化项 Jc_dot * qdot，即接触偏置加速度。
+  DVec<T> _Fr_des;      ///< 各接触点期望反力拼接向量，单位 N。
 
-  DMat<T> _B;
-  DVec<T> _c;
-  DVec<T> task_cmd_;
+  DMat<T> _B;       ///< 由动力学等式消元得到的接触力到基座修正映射。
+  DVec<T> _c;       ///< 与 _B 配套的动力学常数项。
+  DVec<T> task_cmd_;  ///< 临时保存当前优先级任务的操作空间期望加速度。
 };
 
 #endif

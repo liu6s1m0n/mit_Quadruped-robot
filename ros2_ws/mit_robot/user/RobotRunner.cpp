@@ -37,10 +37,12 @@ RobotRunner::LegSensorPointers RobotRunner::sensorPointers(
   return pointers;
 }
 
-RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
+RobotRunner::RobotRunner(
+  mjModel * model, const mjData * data, RobotType robot_type)
 : model_(model), data_(data),
-  /*Unitree Go1 机器人模型；*/
-  quadruped_(makeQuadruped<float>(RobotType::UNITREE_GO1)),
+  control_parameters_(makeRobotControlParameters<float>(robot_type)),
+  /*由 main/SimulationBridge 明确选择的机器人模型。*/
+  quadruped_(makeQuadruped<float>(robot_type)),
   /*腿部控制器*/
   leg_controller_(quadruped_),
   /*IMU 传感器*/
@@ -54,6 +56,15 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
 {
   if (model_ == nullptr || data_ == nullptr) {
     throw std::invalid_argument("RobotRunner requires a MuJoCo model and data");
+  }
+  setHomeCalfContactsEnabled(control_parameters_.start_in_prone_home);
+  if (robot_type == RobotType::UNITREE_GO1) {
+    joint_initialization_duration_ = 0.4F;
+    standing_height_rate_limit_ = 0.16F;
+  } else {
+    joint_initialization_duration_ =
+      control_parameters_.joint_initialization_duration;
+    standing_height_rate_limit_ = control_parameters_.standing_height_rate;
   }
 
   // 仿真时间步是所有滤波器和轨迹推进的共同时间基准。
@@ -72,8 +83,9 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
     quadruped_, *imu_, leg_sensor_pointers_,
     OrientationEstimatorMode::SIMULATION_TRUTH, estimator_parameters);
 
-  // 默认进入平衡站立；真正输出命令前先经过 0.4 秒平滑关节初始化。
-  desired_state_.mode = ControlMode::BalanceStand;
+  // GO1 保留原来的自动站立；DM1 上电保持十二电机零位，等待 Stand up。
+  desired_state_.mode = control_parameters_.start_in_prone_home ?
+    ControlMode::JointPd : ControlMode::BalanceStand;
   /*默认机身高度设为机器人模型中的名义高度*/
   desired_state_.body_position_world.z() = quadruped_.nominalBodyHeight();
   /*标记期望状态有效*/
@@ -97,6 +109,13 @@ RobotRunner::RobotRunner(const mjModel * model, const mjData * data)
 /*设置目标控制模式*/
 void RobotRunner::setControlMode(ControlMode mode) noexcept
 {
+  // DM1 未执行站起前拒绝从趴卧保持状态直接跳入 WBC/步态控制。
+  if (control_parameters_.start_in_prone_home &&
+    (mode == ControlMode::BalanceStand || mode == ControlMode::Locomotion) &&
+    !standingReady())
+  {
+    return;
+  }
   if (desired_state_.mode == mode) {return;}
   if (state_estimate_.valid) {
     // 切换站立/行走时只继承不可观测的水平原点和航向。roll/pitch 必须保持
@@ -109,6 +128,42 @@ void RobotRunner::setControlMode(ControlMode mode) noexcept
   desired_state_.body_acceleration_world.setZero();
   desired_state_.body_angular_velocity.setZero();
   desired_state_.mode = mode;
+}
+
+bool RobotRunner::requestStandUp() noexcept
+{
+  if (!jointInitializationComplete() || !state_estimate_.valid) {return false;}
+  const FSM_StateName state = control_fsm_->currentStateName();
+  if (state != FSM_StateName::JOINT_PD && state != FSM_StateName::PASSIVE) {
+    return false;
+  }
+  if (std::abs(state_estimate_.rpy.x()) > 0.20F ||
+    std::abs(state_estimate_.rpy.y()) > 0.20F)
+  {
+    return false;
+  }
+  desired_state_.body_position_world.x() = state_estimate_.position_world.x();
+  desired_state_.body_position_world.y() = state_estimate_.position_world.y();
+  desired_state_.body_position_world.z() = quadruped_.nominalBodyHeight();
+  desired_state_.body_rpy << 0.0F, 0.0F, state_estimate_.rpy.z();
+  desired_state_.body_velocity_world.setZero();
+  desired_state_.body_acceleration_world.setZero();
+  desired_state_.body_angular_velocity.setZero();
+  // Home 的加粗小腿接触代理只用于静止贴地；站起前关闭，运动阶段继续使用
+  // 原始细碰撞体，避免行走和跳跃时把正常摆腿误判为小腿擦地。
+  setHomeCalfContactsEnabled(false);
+  // GO1 直接执行原足端抬升轨迹；DM1 先贴地收腿到四足支撑区，再自动交给
+  // BalanceStand/WBC 抬升机身，避免展开的趴卧腿直接发力导致前翻。
+  desired_state_.mode = ControlMode::StandUp;
+  return true;
+}
+
+bool RobotRunner::standingReady() const noexcept
+{
+  const FSM_StateName state = control_fsm_->currentStateName();
+  return state == FSM_StateName::BALANCE_STAND ||
+         state == FSM_StateName::LOCOMOTION ||
+         state == FSM_StateName::FRONT_JUMP;
 }
 
 bool RobotRunner::requestFrontJump() noexcept
@@ -153,7 +208,7 @@ void RobotRunner::setStandingHeight(float height)
   if (!std::isfinite(height) || height < minimumStandingHeight() ||
     height > maximumStandingHeight())
   {
-    throw std::invalid_argument("standing height must be within [0.18, 0.34] m");
+    throw std::invalid_argument("standing height is outside the selected robot profile");
   }
   standing_height_target_ = height;
 }
@@ -167,7 +222,8 @@ void RobotRunner::reset()
   state_estimate_ = StateEstimate<float>{};
   joint_states_ = std::array<JointState<float>, kNumLegs>{};
   desired_state_ = DesiredState<float>{};
-  desired_state_.mode = ControlMode::BalanceStand;
+  desired_state_.mode = control_parameters_.start_in_prone_home ?
+    ControlMode::JointPd : ControlMode::BalanceStand;
   desired_state_.body_position_world.z() = quadruped_.nominalBodyHeight();
   desired_state_.valid = true;
   joint_initialization_started_ = false;
@@ -175,7 +231,22 @@ void RobotRunner::reset()
   standing_height_command_initialized_ = false;
   desired_state_initialized_ = false;
   control_fsm_->initialize();
+  setHomeCalfContactsEnabled(control_parameters_.start_in_prone_home);
   disableCommands();
+}
+
+void RobotRunner::setHomeCalfContactsEnabled(bool enabled) noexcept
+{
+  if (!control_parameters_.start_in_prone_home || model_ == nullptr) {return;}
+  constexpr std::array<const char *, kNumLegs> names{
+    "FR_home_calf_contact", "FL_home_calf_contact",
+    "RR_home_calf_contact", "RL_home_calf_contact"};
+  for (const char * name : names) {
+    const int geom = mj_name2id(model_, mjOBJ_GEOM, name);
+    if (geom < 0) {continue;}
+    model_->geom_contype[geom] = enabled ? 1 : 0;
+    model_->geom_conaffinity[geom] = enabled ? 1 : 0;
+  }
 }
 
 void RobotRunner::updateStandingHeightCommand()
@@ -239,15 +310,24 @@ void RobotRunner::prepareJointInitialization()
 
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     /*target,travel这两个是啥玩意*/
-    const Vec3<float> target = quadruped_.leg(kLegOrder[leg]).joints.home_position;
+    const Vec3<float> target = control_parameters_.start_in_prone_home ?
+      control_parameters_.motor_zero_position :
+      quadruped_.leg(kLegOrder[leg]).joints.home_position;
     const Vec3<float> travel = target - initial_joint_positions_[leg];
     auto & command = leg_controller_.commands[leg];
     command.position_desired = initial_joint_positions_[leg] + blend * travel;
     command.velocity_desired = blend_rate * travel;
     // 初始化阶段恢复经过验证的 PD；行走提速只在 Locomotion 摆动腿生效，
     // 避免把更快的启动过程误认为电机行走速度提升。
-    command.kp_joint.setConstant(60.0F);
-    command.kd_joint.setConstant(3.0F);
+    if (quadruped_.robotType() == RobotType::UNITREE_GO1) {
+      command.kp_joint.setConstant(60.0F);
+      command.kd_joint.setConstant(3.0F);
+    } else {
+      // DM1 Home 有四段小腿同时接地，必须从第一帧使用专用零位刚度抵抗
+      // 接触反力；该增益仅在趴卧锁定阶段使用，不会进入 WBC/步态控制。
+      command.kp_joint = control_parameters_.prone_home_joint_kp;
+      command.kd_joint = control_parameters_.prone_home_joint_kd;
+    }
   }
 }
 

@@ -16,6 +16,10 @@ endfunction()
 # Model and dynamics
 add_robot_unit_test(test_model_quadruped model/quadruped_test.cpp)
 add_robot_mujoco_test(test_model_go1_consistency model/go1_model_consistency_test.cpp)
+add_robot_unit_test(test_model_dm1_load model/dm1_model_load_test.cpp)
+target_compile_definitions(test_model_dm1_load PRIVATE
+  MYMIT_ROBOT_DM1_TEST_SCENE_PATH="${PROJECT_SOURCE_DIR}/src/dm1_description/dm1/scene.xml"
+)
 add_robot_unit_test(test_model_floating_base model/floating_base_model_test.cpp)
 
 # Sensor adapters
@@ -61,3 +65,15 @@ target_include_directories(test_integration_simulation PRIVATE
 )
 target_link_libraries(test_integration_simulation mymit_robot_model Eigen3::Eigen)
 set_tests_properties(test_integration_simulation PROPERTIES LABELS "integration;slow")
+
+ament_add_gtest(test_integration_dm1_standing
+  integration/dm1_standing_test.cpp
+  ${PROJECT_SOURCE_DIR}/user/RobotRunner.cpp
+  ${PROJECT_SOURCE_DIR}/user/SimulationDiagnostics.cpp
+)
+target_compile_definitions(test_integration_dm1_standing PRIVATE
+  MYMIT_ROBOT_DM1_TEST_SCENE_PATH="${PROJECT_SOURCE_DIR}/src/dm1_description/dm1/scene.xml"
+)
+target_include_directories(test_integration_dm1_standing PRIVATE ${PROJECT_SOURCE_DIR}/user)
+target_link_libraries(test_integration_dm1_standing mymit_robot_model Eigen3::Eigen)
+set_tests_properties(test_integration_dm1_standing PROPERTIES LABELS "integration;slow;dm1")

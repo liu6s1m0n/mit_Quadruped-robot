@@ -18,16 +18,16 @@
 
 struct SimulationDiagnosticReport
 {
-  float maximum_position_error = 0.0F;
-  float maximum_velocity_error = 0.0F;
-  float maximum_orientation_error = 0.0F;
-  float maximum_absolute_pitch = 0.0F;
-  float minimum_height = std::numeric_limits<float>::infinity();
-  std::size_t calf_collision_frames = 0;
-  std::size_t rejected_control_frames = 0;
-  std::size_t observed_frames = 0;
-  double squared_position_error_sum = 0.0;
-  double squared_velocity_error_sum = 0.0;
+  float maximum_position_error = 0.0F;      ///< 估计位置与 MuJoCo 真值的最大距离，m。
+  float maximum_velocity_error = 0.0F;      ///< 估计线速度与真值的最大差值，m/s。
+  float maximum_orientation_error = 0.0F;   ///< 估计姿态与真值的最大旋转角误差，rad。
+  float maximum_absolute_pitch = 0.0F;      ///< 机身俯仰角绝对值的历史最大值，rad。
+  float minimum_height = std::numeric_limits<float>::infinity();  ///< 机身最低离地高度，m。
+  std::size_t calf_collision_frames = 0;    ///< 检测到任一小腿碰地的仿真帧数。
+  std::size_t rejected_control_frames = 0;  ///< 控制器输出无效而被安全层拒绝的帧数。
+  std::size_t observed_frames = 0;          ///< 已纳入统计的有效仿真帧总数。
+  double squared_position_error_sum = 0.0;  ///< 位置误差平方累计值，用于计算 RMS。
+  double squared_velocity_error_sum = 0.0;  ///< 速度误差平方累计值，用于计算 RMS。
 
   float rmsPositionError() const noexcept;
   float rmsVelocityError() const noexcept;
@@ -54,14 +54,14 @@ public:
 private:
   static int requireObject(const mjModel * model, int type, const char * name);
 
-  const mjModel * model_ = nullptr;
-  int trunk_body_ = -1;
-  int floor_geom_ = -1;
-  std::array<int, kNumLegs> foot_geoms_{};
-  std::array<int, kNumLegs> calf_bodies_{};
-  Vec3<float> position_offset_ = Vec3<float>::Zero();
-  bool position_offset_initialized_ = false;
-  SimulationDiagnosticReport report_{};
+  const mjModel * model_ = nullptr;  ///< 非拥有型 MuJoCo 模型指针，用于查询对象和状态布局。
+  int trunk_body_ = -1;             ///< trunk 刚体在 model->body_* 数组中的编号。
+  int floor_geom_ = -1;             ///< 地面几何体在 model->geom_* 数组中的编号。
+  std::array<int, kNumLegs> foot_geoms_{};   ///< FR/FL/RR/RL 足端几何体编号。
+  std::array<int, kNumLegs> calf_bodies_{};  ///< FR/FL/RR/RL 小腿刚体编号。
+  Vec3<float> position_offset_ = Vec3<float>::Zero();  ///< 首帧对齐估计坐标系和世界坐标系的平移量，m。
+  bool position_offset_initialized_ = false;  ///< position_offset_ 是否已由首帧建立。
+  SimulationDiagnosticReport report_{};       ///< 从 reset() 后累计到当前帧的诊断结果。
 };
 
 #endif  // MYMIT_ROBOT_USER_SIMULATION_DIAGNOSTICS_HPP_

@@ -59,14 +59,14 @@ protected:
   virtual bool _UpdateUf() = 0;
   virtual bool _UpdateInequalityVector() = 0;
 
-  int idx_Fz_;
-  DMat<T> Uf_;
-  DVec<T> ieq_vec_;
-  DVec<T> Fr_des_;
+  int idx_Fz_;           ///< 接触力向量中法向力 Fz 的索引。
+  DMat<T> Uf_;           ///< 线性化摩擦锥和法向力边界的系数矩阵。
+  DVec<T> ieq_vec_;      ///< 接触不等式边界，使 Uf*Fr >= ieq_vec。
+  DVec<T> Fr_des_;       ///< 当前接触点的期望反力，单位 N。
 
-  DMat<T> Jc_;
-  DVec<T> JcDotQdot_;
-  size_t dim_contact_;
-  bool b_set_contact_;
+  DMat<T> Jc_;           ///< 接触雅可比，将广义速度映射到接触点速度。
+  DVec<T> JcDotQdot_;    ///< 接触点偏置加速度 Jc_dot*qdot。
+  size_t dim_contact_;   ///< 本接触约束的力/运动维数。
+  bool b_set_contact_;   ///< 本周期接触雅可比和约束是否已成功更新。
 };
 #endif

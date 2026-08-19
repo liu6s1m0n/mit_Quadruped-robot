@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "model/quadruped.hpp"
+#include "model/robot_control_parameters.hpp"
 
 // float 精度下机器精度约为 1e-7，容差需放宽到 1e-4 才能稳定通过。
 constexpr float kTolerance = 1e-4f;
@@ -123,4 +124,55 @@ TEST(Go1QuadrupedTest, HasSymmetricPositiveDefiniteInertiaMatrices)
     expectSymmetricPositiveDefinite(leg.thigh_inertia);
     expectSymmetricPositiveDefinite(leg.calf_inertia);
   }
+}
+
+TEST(Dm1QuadrupedTest, FactoryProvidesACompleteIndependentModel)
+{
+  const auto model = makeQuadruped<float>(RobotType::DM_BOT1);
+
+  EXPECT_EQ(model.robotType(), RobotType::DM_BOT1);
+  EXPECT_NEAR(model.nominalBodyHeight(), 0.39F, kTolerance);
+  EXPECT_NEAR(model.totalMass(), 14.705035F, kTolerance);
+  EXPECT_TRUE(model.isValid());
+  for (const auto & leg : model.legs()) {
+    EXPECT_TRUE((leg.joints.home_position.array() <=
+      leg.joints.upper_limit.array()).all());
+    EXPECT_TRUE((leg.joints.home_position.array() >=
+      leg.joints.lower_limit.array()).all());
+  }
+  EXPECT_NEAR(model.leg(LegId::FR).joints.home_position.y(), -0.597F, kTolerance);
+  EXPECT_NEAR(model.leg(LegId::RR).joints.home_position.y(), -0.597F, kTolerance);
+  EXPECT_NEAR(model.leg(LegId::FR).joints.home_position.z(), 1.432F, kTolerance);
+  EXPECT_NEAR(model.leg(LegId::FL).joints.home_position.z(), 1.432F, kTolerance);
+  EXPECT_NEAR(model.leg(LegId::RR).joints.home_position.z(), 1.468F, kTolerance);
+  EXPECT_NEAR(model.leg(LegId::RL).joints.home_position.z(), 1.468F, kTolerance);
+  EXPECT_TRUE(model.leg(LegId::FR).joints.zero_offset.isApprox(
+    Vec3<float>(0.0F, -0.203F, -2.25F)));
+  EXPECT_TRUE(model.leg(LegId::RR).joints.zero_offset.isApprox(
+    Vec3<float>(0.0F, -0.203F, -2.25F)));
+}
+
+TEST(RobotControlParametersTest, KeepsGo1AndDm1ProfilesIndependent)
+{
+  const auto go1 = makeRobotControlParameters<float>(RobotType::UNITREE_GO1);
+  const auto dm1 = makeRobotControlParameters<float>(RobotType::DM_BOT1);
+
+  EXPECT_FLOAT_EQ(go1.maximum_standing_height, 0.34F);
+  EXPECT_FLOAT_EQ(dm1.maximum_standing_height, 0.42F);
+  EXPECT_FLOAT_EQ(go1.joint_initialization_duration, 0.4F);
+  EXPECT_FLOAT_EQ(dm1.joint_initialization_duration, 1.2F);
+  EXPECT_FLOAT_EQ(go1.maximum_normal_force, 1500.0F);
+  EXPECT_FLOAT_EQ(dm1.maximum_normal_force, 150.0F);
+  EXPECT_FLOAT_EQ(go1.locomotion_swing_height, 0.09F);
+  EXPECT_FLOAT_EQ(dm1.locomotion_swing_height, 0.075F);
+  EXPECT_FLOAT_EQ(go1.locomotion_max_lateral_foot_offset, 0.18F);
+  EXPECT_FLOAT_EQ(dm1.locomotion_max_lateral_foot_offset, 0.24F);
+  EXPECT_FALSE(go1.start_in_prone_home);
+  EXPECT_TRUE(dm1.start_in_prone_home);
+  EXPECT_TRUE(dm1.motor_zero_position.isZero());
+  EXPECT_TRUE(go1.use_go1_height_joint_mapping);
+  EXPECT_FALSE(dm1.use_go1_height_joint_mapping);
+  EXPECT_FALSE(go1.initialization_kp.isApprox(dm1.initialization_kp));
+  EXPECT_FALSE(
+    go1.balance_body_position_kd.isApprox(dm1.balance_body_position_kd));
 }

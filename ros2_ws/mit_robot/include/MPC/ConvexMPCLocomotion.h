@@ -21,17 +21,17 @@ template<typename T>
 struct LocomotionResult
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  DesiredState<T> command{};
-  std::array<Vec3<T>, kNumLegs> reaction_forces_world{};
-  std::array<T, kNumLegs> contact_phase{};
-  std::array<T, kNumLegs> swing_phase{};
-  std::array<T, kNumLegs> stance_time{};
-  std::array<T, kNumLegs> swing_time{};
-  std::array<bool, kNumLegs> contact_state{};
+  DesiredState<T> command{};  ///< 经过限幅和坐标转换后真正使用的目标状态。
+  std::array<Vec3<T>, kNumLegs> reaction_forces_world{};  ///< 四条腿世界系反力。
+  std::array<T, kNumLegs> contact_phase{};  ///< 各腿支撑期相位。
+  std::array<T, kNumLegs> swing_phase{};  ///< 各腿摆动期相位。
+  std::array<T, kNumLegs> stance_time{};  ///< 各腿支撑持续时间。
+  std::array<T, kNumLegs> swing_time{};  ///< 各腿摆动持续时间。
+  std::array<bool, kNumLegs> contact_state{};  ///< 当前预测表第一行的接触状态。
   /** 本控制周期是否实际执行并刷新了 MPC 优化解。 */
   bool mpc_updated = false;
-  bool mpc_converged = false;
-  bool valid = false;
+  bool mpc_converged = false;  ///< 最近一次 MPC 优化是否收敛。
+  bool valid = false;  ///< 本次输出是否可供下游控制器使用。
 };
 
 template<typename T>
@@ -40,20 +40,38 @@ class ConvexMPCLocomotion
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
+  /**
+   * @brief 创建步态和接触力 MPC 封装。
+   * @param quadruped 四足机器人模型。
+   * @param control_time_step 外部高速控制周期，单位 s。
+   * @param iterations_between_mpc 两次 MPC 求解之间的控制周期数。
+   * @param settings 接触力求解器参数。
+   * @param iterations_per_gait_segment 每个步态段对应的控制周期数；为 0 时沿用求解间隔。
+   */
   ConvexMPCLocomotion(
     const Quadruped<T> & quadruped, T control_time_step,
     std::size_t iterations_between_mpc = 15,
     const SolverSettings<T> & settings = SolverSettings<T>{},
     std::size_t iterations_per_gait_segment = 0);
 
+  /** @brief 清零周期、命令斜坡和缓存的 MPC 输出。 */
   void initialize() noexcept;
+  /** @brief 设置当前步态；当前实现支持 STAND 和 TROT。 */
   void setGait(GaitType gait);
   /** 设置机身沿目标偏航方向的固定前进速度，单位 m/s。 */
+  /** @brief 设置机身前向速度，单位 m/s。 */
   void setForwardVelocity(T velocity);
   /**
    * 设置机身坐标系速度命令：x 向前、y 向左、yaw 绕 z 轴逆时针，单位 m/s、rad/s。
    */
   void setVelocityCommand(T forward_velocity, T lateral_velocity, T yaw_rate);
+  /**
+   * @brief 推进一步运动 MPC。
+   * @param estimate 当前状态估计。
+   * @param desired 外部期望机身状态。
+   * @param foot_positions_world 当前四条腿足端世界系位置。
+   * @return 步态相位、当前接触状态和最近一次有效反力。
+   */
   LocomotionResult<T> run(
     const StateEstimate<T> & estimate, const DesiredState<T> & desired,
     const std::array<Vec3<T>, kNumLegs> & foot_positions_world);

@@ -106,36 +106,49 @@ FloatingBaseModel<T> makeFloatingBaseModel(const Quadruped<T> & quadruped)
 
   const Mat3<T> identity = Mat3<T>::Identity();
   constexpr int kFloatingBaseBodyId = 5;
+  DVec<T> joint_position_offsets = DVec<T>::Zero(kNumJoints);
 
   for (const auto & leg : quadruped.legs()) {
     // 每条腿依次添加髋、腿和小腿刚体，父子关系与真实运动链一致。
     const std::string prefix = detail::legName(leg.leg);
+    joint_position_offsets.segment(
+      static_cast<Eigen::Index>(static_cast<std::size_t>(leg.leg) * kJointsPerLeg),
+      kJointsPerLeg) = leg.joints.zero_offset;
     const int hip = result.addBody(
       detail::spatialInertia(leg.hip_inertia), leg.joints.armature[0],
       kFloatingBaseBodyId, spatial::JointType::Revolute,
       detail::coordinateAxis(leg.joints.joint_axes.col(0)),
       spatial::createSXform(identity, leg.hip_location_body), prefix + "_hip");
 
-    const Vec3<T> thigh_offset(
-      T(0), quadruped.sideSign(leg.leg) * leg.hip_link_length, T(0));
+    // GO1 保留原来的标量表达式；DM1 使用从 URDF/MJCF 提取的三维关节偏移。
+    const Vec3<T> thigh_offset =
+      quadruped.robotType() == RobotType::UNITREE_GO1 ?
+      Vec3<T>(T(0), quadruped.sideSign(leg.leg) * leg.hip_link_length, T(0)) :
+      leg.hip_to_thigh;
     const int thigh = result.addBody(
       detail::spatialInertia(leg.thigh_inertia), leg.joints.armature[1], hip,
       spatial::JointType::Revolute,
       detail::coordinateAxis(leg.joints.joint_axes.col(1)),
       spatial::createSXform(identity, thigh_offset), prefix + "_thigh");
 
-    const Vec3<T> calf_offset(T(0), T(0), -leg.thigh_link_length);
+    const Vec3<T> calf_offset =
+      quadruped.robotType() == RobotType::UNITREE_GO1 ?
+      Vec3<T>(T(0), T(0), -leg.thigh_link_length) : leg.thigh_to_calf;
     const int calf = result.addBody(
       detail::spatialInertia(leg.calf_inertia), leg.joints.armature[2], thigh,
       spatial::JointType::Revolute,
       detail::coordinateAxis(leg.joints.joint_axes.col(2)),
       spatial::createSXform(identity, calf_offset), prefix + "_calf");
 
+    const Vec3<T> foot_offset =
+      quadruped.robotType() == RobotType::UNITREE_GO1 ?
+      Vec3<T>(T(0), T(0), -leg.calf_link_length) : leg.calf_to_foot;
     result.addGroundContactPoint(
       // 足端接触点位于小腿末端，后续雅可比、MPC/WBC 都引用该注册顺序。
-      calf, Vec3<T>(T(0), T(0), -leg.calf_link_length), true);
+      calf, foot_offset, true);
   }
 
+  result.setJointPositionOffsets(joint_position_offsets);
   result.check();
   return result;
 }

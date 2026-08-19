@@ -1,6 +1,6 @@
 /**
  * @file FSM_State_StandUp.h
- * @brief 通过足端笛卡尔阻抗轨迹将机身平滑抬升到名义高度。
+ * @brief GO1 抬升机身；DM1 先贴地收腿到稳定的四足支撑预备姿态。
  */
 #ifndef MYMIT_ROBOT_FSM_STATE_STAND_UP_H_
 #define MYMIT_ROBOT_FSM_STATE_STAND_UP_H_
@@ -27,6 +27,8 @@ public:
 
 private:
   std::array < Vec3 < T >, kNumLegs > initial_foot_positions_ {};
+  /** DM1 点击站立按钮时四条腿的实测电机角，作为平滑收腿轨迹起点。 */
+  std::array < Vec3 < T >, kNumLegs > initial_joint_positions_ {};
   std::size_t iteration_ = 0;
   std::size_t ramp_iterations_ = 1;
   bool stand_up_complete_ = false;

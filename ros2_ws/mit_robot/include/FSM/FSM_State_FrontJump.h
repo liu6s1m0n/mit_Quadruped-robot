@@ -1,6 +1,6 @@
 /**
  * @file FSM_State_FrontJump.h
- * @brief 与当前 GO1 控制链兼容的一次性向前跳状态。
+ * @brief 按 GO1/DM1 独立参数执行的一次性向前跳状态。
  */
 #ifndef MYMIT_ROBOT_FSM_STATE_FRONT_JUMP_H_
 #define MYMIT_ROBOT_FSM_STATE_FRONT_JUMP_H_

@@ -1,4 +1,46 @@
-# GO1 控制参数表
+# GO1 / DM1 控制与模型说明
+
+## 选择机器人模型
+
+控制程序同时保留 GO1 和 DM1。默认仍启动 GO1：
+
+```bash
+ros2 run mymit_robot mymit_robot_user
+ros2 run mymit_robot mymit_robot_user --robot dm1
+```
+
+通过 launch 启动时使用 `robot` 参数：
+
+```bash
+ros2 launch mymit_robot mymit_robot.launch.py robot:=go1
+ros2 launch mymit_robot mymit_robot.launch.py robot:=dm1
+```
+
+## 仿真加速与显卡选择
+
+工程默认以 `Release (-O3)` 编译，并取消了运行状态下每个物理步固定的 `1 ms`
+等待。ROS 2 launch 默认设置 `render_gpu:=nvidia`，通过 NVIDIA PRIME/GLVND
+让 MuJoCo 的 GLFW/OpenGL 窗口使用独立显卡：
+
+```bash
+ros2 launch mymit_robot mymit_robot.launch.py robot:=dm1 render_gpu:=nvidia
+```
+
+启动日志中的 `OpenGL renderer` 会显示实际使用的设备。若系统没有 NVIDIA
+OpenGL 用户态库，可暂时使用 `render_gpu:=auto`，或安装与驱动版本匹配的软件包；
+当前机器的 595.84 驱动对应：
+
+```bash
+sudo apt-get install -y libnvidia-gl-595
+```
+
+MuJoCo C 引擎的单条仿真仍主要运行在 CPU；GPU 在这里加速的是可视化渲染。
+本工程的主要提速来自 Release 编译对 MPC/WBC/Eigen 运算的优化。
+
+DM1 的 MuJoCo 模型位于 `mit_robot/src/dm1_description/dm1`，其模型参数与
+网格来自桌面 `legged_examples/legged_damiao/legged_damiao_description`。
+
+## GO1 控制参数表
 
 本文只记录当前正式控制链中可人为调整的控制、估计、步态、求解和调度参数。质量、惯量、连杆尺寸、关节限位、额定转矩等机器人固有参数不在此表中。
 
@@ -12,20 +54,20 @@
 | `mit_robot/include/FSM/ControlFSMData.h` | `control_time_step` | `0.001 s` | 被 `RobotRunner` 覆盖为 `model->opt.timestep = 0.002 s` | 只有不从正式入口构造 FSM 时才会使用 1 ms 默认值。 |
 | `mit_robot/user/main.cpp` | `kStandingHeight` | — | `0.27 m` | 正式入口最终站立高度。 |
 | `mit_robot/user/main.cpp` | `kSlowWalkingForwardSpeed` / `kFastWalkingForwardSpeed` | — | `0.18 / 0.36 m/s` | MuJoCo 的 `Forward slow` 用于崎岖地形稳定行走，`Forward fast` 比原 `0.30 m/s` 适度提速。 |
-| `mit_robot/user/main.cpp` | `kWalkingLateralSpeed` | — | `0.25 m/s` | MuJoCo Left/Right 两个方向开关使用的速度绝对值。 |
-| `mit_robot/user/main.cpp` | `kTurningYawRate` | — | `0.35 rad/s` | MuJoCo Rotate CCW 开关使用的逆时针自转角速度。 |
+| `mit_robot/user/main.cpp` | `kGo1WalkingLateralSpeed` / `kDm1WalkingLateralSpeed` | — | GO1=`0.25 m/s`，DM1=`0.20 m/s` | DM1 使用独立的平稳横移档；左右方向仅改变符号。 |
+| `mit_robot/user/main.cpp` | `kTurningYawRate` | — | `0.30 rad/s` | MuJoCo Rotate CCW 开关使用的逆时针自转角速度。 |
 | `mit_robot/user/SimulationBridge.hpp` | `standing_height_` / UI 初始值 | `0.27 m` | 被 `main.cpp` 设置为 `0.27 m` | 仿真 UI 与控制器的初始目标。 |
 | `mit_robot/user/SimulationBridge.hpp` | `slow_walking_forward_speed_` / `fast_walking_forward_speed_` | `0.18 / 0.36 m/s` | 被 `main.cpp` 设置为相同值 | 慢档必须低于快档，两档均沿用 MPC 的平滑速度斜坡。 |
 | `mit_robot/user/SimulationBridge.hpp` | `walking_backward_speed_` | `0.30 m/s` | 未覆盖 | 后退速度保持拆档前的当前值。 |
-| `mit_robot/user/SimulationBridge.hpp` | `walking_lateral_speed_` | `0.25 m/s` | 被 `main.cpp` 设置为 `0.25 m/s` | 左移为正、右移为负。 |
-| `mit_robot/user/SimulationBridge.hpp` | `turning_yaw_rate_` | `0.35 rad/s` | 被 `main.cpp` 设置为 `0.35 rad/s` | 当前第五个开关执行逆时针自转。 |
+| `mit_robot/user/SimulationBridge.hpp` | `walking_lateral_speed_` | `0.25 m/s` | GO1=`0.25 m/s`，DM1=`0.20 m/s` | 左移为正、右移为负。 |
+| `mit_robot/user/SimulationBridge.hpp` | `turning_yaw_rate_` | `0.35 rad/s` | 被 `main.cpp` 设置为 `0.30 rad/s` | 当前自转开关执行逆时针自转。 |
 | `mit_robot/user/SimulationBridge.hpp` / `.cpp` | 六个运动开关 | 全部关闭 | `Forward slow / Forward fast / Backward / Left / Right / Rotate CCW` 互斥 | 新打开的运动取得控制权；关闭当前运动后切回 BalanceStand。 |
 | `mit_robot/user/SimulationBridge.cpp` | `Jump forward` 按钮 | 未触发 | 单次向前跳 | 仅在稳定的 BalanceStand 中接受；动作结束自动回站立，行走、倾斜或速度过大时拒绝。 |
 | `mit_robot/src/FSM/FSM_State_FrontJump.cpp` | 向前跳阶段时间 | — | `0.18 / 0.18 / 0.17 / 0.25 s` | 顺序为预蹲、水平化蹬伸、空中收腿、带俯仰阻尼的落地缓冲，总时长约 `0.78 s`。 |
 | `mit_robot/src/FSM/FSM_State_FrontJump.cpp` | 蹬伸分配 | — | 前腿 `[0,1.20,-1.25]`，后腿 `[0,1.10,-1.20] rad` | 足端以后扫为主并保留小幅前后腿差异，增加水平冲量同时抵消俯仰力矩。 |
 | `mit_robot/user/StandingHeightIpc.hpp` | 高度最小值 / 最大值 / 默认值 | `0.18 / 0.34 / 0.27 m` | 未覆盖 | 同时约束 ROS 2 服务、IPC 和 MuJoCo 滑块。 |
 | `mit_robot/user/SimulationBridge.cpp` | UI 高度范围 | `0.18～0.34 m` | 未覆盖 | 应与 `StandingHeightIpc.hpp` 保持一致。 |
-| `mit_robot/user/SimulationBridge.cpp` | 物理线程轮询休眠 | `1 ms` | 未覆盖 | 只影响主机调度和 CPU 占用，不改变 MuJoCo 的 2 ms 物理步长。 |
+| `mit_robot/user/SimulationBridge.cpp` | 物理线程调度 | 按模型 `timestep` 与墙钟同步；暂停时休眠 `1 ms` | 未覆盖 | 控制计算后先释放渲染锁，再等待至下一个 2 ms 周期；避免物理线程抢占 GUI，同时保持 500 Hz 实时仿真。 |
 | `mit_robot/user/SimulationDiagnostics.cpp` | 正式运行诊断输出周期 | `500`帧 | 约`1 s` | 主程序持续统计估计RMS、最大俯仰、最低高度、小腿碰地和控制拒绝帧；只读诊断，不修改控制。 |
 | `mit_robot/user/RobotRunner.hpp` | `defaultWalkingForwardSpeed()` | `0.32 m/s` | UI 慢/快档命令覆盖为入口配置值 | 不经过方向接口时使用。 |
 | `mit_robot/user/RobotRunner.hpp` | `joint_initialization_duration_` | `0.4 s` | 未覆盖 | 上电关节回 home 的 smoothstep 时间；启动阶段不用于行走提速。 |
@@ -66,14 +108,15 @@
 
 | 文件 | 参数 | 初始化/默认值 | 当前最终值 | 说明 |
 |---|---|---:|---:|---|
-| `mit_robot/include/FSM/FSM_State_Locomotion.h` | `swing_height_` | `0.10 m` | 未覆盖 | 保持原抬脚高度，不再通过增加高度间接提速。 |
-| `mit_robot/include/FSM/FSM_State_Locomotion.h` | `maximum_step_length_` | `0.20 m` | 未覆盖 | 单步水平位移限幅。 |
+| `mit_robot/include/model/robot_control_parameters.hpp` | `locomotion_swing_height` | — | GO1=`0.09 m`，DM1=`0.075 m` | 两种机型分别限制摆动惯性，避免过度收腿引起小腿擦地。 |
+| `mit_robot/include/FSM/FSM_State_Locomotion.h` | `maximum_step_length_` | `0.15 m` | 未覆盖 | 单步水平位移限幅。 |
 | `mit_robot/include/FSM/FSM_State_Locomotion.h` | `swing_joint_velocity_scale_` | `[1,1.5,1.5]` | 未覆盖 | 仅摆动腿生效；Hip/Thigh/Calf速度前馈倍率，支撑腿不缩放，最终按GO1速度上限裁剪。 |
 | `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | 落脚支撑时间比例 | — | `0.5 × stance_time` | 落点预估使用 `swing_time + 0.5×stance_time`。 |
 | `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | 落脚速度误差反馈增益 | — | `0.08 s` | `step = placement_time × measured_velocity + 0.08 × velocity_error`。 |
 | `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | 行走目标步态 | MPC 初始化为 `STAND` | MPC=`TROT`，调度器=`TROT_WALK` | 两者最终都使用 60% 支撑率。 |
 | `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | 行走安全 roll / pitch | — | `40° / 40°` | 超限后回到 BalanceStand。 |
-| `mit_robot/src/FSM/FSM_State_Locomotion.cpp` | 足端横向偏移 / 速度上限 | — | `0.18 m / 9 m/s` | 任一腿超限则退出行走。 |
+| `mit_robot/include/model/robot_control_parameters.hpp` | 足端横向偏移 / 速度上限 | — | GO1=`0.18 m`，DM1=`0.24 m`；速度=`9 m/s` | DM1 名义足宽更大，不能沿用 GO1 边界，否则横移会反复退出行走。 |
+| `mit_robot/src/dm1_description/dm1/dm1.xml` | DM1 足底接触 `solref / solimp` | — | `0.008 1.5 / 0.9 0.95 0.001` | 提高落地阻尼并保持较小接触穿透。 |
 | `mit_robot/src/FSM/FSM_State_BalanceStand.cpp` | 浮动基加速度权重 | WBC 默认 `0.1` | `1000` | 站立状态显著提高机身任务优先级；行走状态仍为 `0.1`。 |
 | `mit_robot/src/FSM/FSM_State_BalanceStand.cpp` | 低高度回退阈值 / 回退高度 | — | `0.20 / 0.30 m` | 进入站立时估计高度过低才使用。 |
 | `mit_robot/src/FSM/FSM_State_BalanceStand.cpp` | 第二层高度单周期限幅 | — | `0.001 m/周期` | 500 Hz 下等价 `0.5 m/s`；当前最终实际仍受 `RobotRunner` 的 `0.08 m/s` 更严格限制。 |
@@ -96,8 +139,8 @@
 
 | 文件 | 参数 | 初始化/默认值 | 当前最终值 | 说明 |
 |---|---|---:|---:|---|
-| `mit_robot/include/WBC/WBC_Ctrl/WBC_Ctrl.hpp` | 输出关节 `Kp` | `[5,5,5]` | 行走 `[30,42,42]`；站立 `[20,20,20]`；初始化 `[60,60,60]` | 顺序为hip、thigh、calf；配合速度前馈，不用过高刚度强行提速。 |
-| `mit_robot/include/WBC/WBC_Ctrl/WBC_Ctrl.hpp` | 输出关节 `Kd` | `[1.5,1.5,1.5]` | 行走 `[4,4.5,4.5]`；站立 `[2,2,2]`；初始化 `[3,3,3]` | 提供适量阻尼；更高阻尼已验证会使高速落脚过硬并增加小腿擦地。 |
+| `mit_robot/include/WBC/WBC_Ctrl/WBC_Ctrl.hpp` | 输出关节 `Kp` | `[5,5,5]` | GO1 行走=`[30,42,42]`，DM1 行走=`[50,42,42]` | DM1 提高 HAA 跟踪刚度，避免横移时侧向足端落后。 |
+| `mit_robot/include/WBC/WBC_Ctrl/WBC_Ctrl.hpp` | 输出关节 `Kd` | `[1.5,1.5,1.5]` | GO1 行走=`[4,4.5,4.5]`，DM1 行走=`[8,5,5]` | DM1 HAA 使用更强阻尼抑制横向落脚反弹。 |
 | `mit_robot/include/WBC/WBC_Ctrl/WBC_Ctrl.hpp` | 浮动基权重 | `0.1` | 行走 `0.1`；站立 `1000` | WBIC 中机身加速度修正的代价权重。 |
 | `mit_robot/include/WBC/WBC_Ctrl/WBC_Ctrl.hpp` | 反作用力权重 | `1` | 未覆盖 | WBIC 对接触力修正的代价权重。 |
 | `mit_robot/include/WBC/WBC_Ctrl/BodyPosTask.hpp` / `BodyPosTask.cpp` | 机身位置 `Kp_kin / Kp / Kd` | `[1,1,1] / [50,50,50] / [1,1,1]` | 未覆盖 | 站立和行走当前相同。 |

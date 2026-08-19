@@ -13,6 +13,10 @@ TEST(FrontJumpStateTest, ProducesBoundedOneShotTrajectoryAndReturnsToStand)
   // 前跳应依次经过收腿/蹬伸阶段，并在有限控制周期内完成。
   test_support::FsmContext context(0.01F);
   ASSERT_TRUE(context.initialized);
+  EXPECT_FLOAT_EQ(context.control_parameters.jump_crouch_duration, 0.18F);
+  EXPECT_FLOAT_EQ(context.control_parameters.jump_thrust_duration, 0.18F);
+  EXPECT_FLOAT_EQ(context.control_parameters.jump_tuck_duration, 0.17F);
+  EXPECT_FLOAT_EQ(context.control_parameters.jump_landing_duration, 0.25F);
   context.desired.mode = ControlMode::FrontJump;
   auto data = context.data();
   FSM_State_FrontJump<float> jump(&data);

@@ -1,3 +1,8 @@
+/**
+ * @file RobotState.cpp
+ * @brief MPC 紧凑状态的构造、坐标转换和有效性检查实现。
+ */
+
 #include "MPC/RobotState.h"
 
 #include <cmath>
@@ -7,10 +12,17 @@
 namespace mpc
 {
 
+/**
+ * @brief 将机身角速度转换为 ZYX 欧拉角导数。
+ * @tparam T 标量类型。
+ * @param rpy 当前滚转、俯仰、偏航角。
+ * @param angular_velocity_body 机身坐标系角速度。
+ * @return 欧拉角速度；俯仰角接近奇异时返回 NaN。
+ */
 template<typename T>
 Vec3<T> RobotState<T>::rpyRateFromBodyAngularVelocity(
   const Vec3<T> & rpy, const Vec3<T> & angular_velocity_body)
-{
+{ 
   const T sin_roll = std::sin(rpy.x());
   const T cos_roll = std::cos(rpy.x());
   const T cos_pitch = std::cos(rpy.y());
@@ -26,6 +38,13 @@ Vec3<T> RobotState<T>::rpyRateFromBodyAngularVelocity(
   return body_angular_velocity_to_rpy_rate * angular_velocity_body;
 }
 
+/**
+ * @brief 从状态估计构造 MPC 所需的机器人状态。
+ * @tparam T 标量类型。
+ * @param estimate 状态估计数据。
+ * @param feet_world 世界坐标系足端位置。
+ * @return 填充后的 MPC 状态。
+ */
 template<typename T>
 RobotState<T> RobotState<T>::fromEstimate(
   const StateEstimate<T> & estimate,
@@ -45,6 +64,11 @@ RobotState<T> RobotState<T>::fromEstimate(
   return result;
 }
 
+/**
+ * @brief 检查状态是否可以安全地进入 MPC 求解器。
+ * @tparam T 标量类型。
+ * @return 所有状态量有限且 valid 标志为 true 时返回 true。
+ */
 template<typename T>
 bool RobotState<T>::isValid() const noexcept
 {

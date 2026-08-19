@@ -1,6 +1,36 @@
 cmake_minimum_required(VERSION 3.8)
 project(mymit_robot)
 
+# ROS 2 Humble 的 Python 生成工具安装在系统 Python 3.10 中。用户激活
+# Conda 后，PATH 中的 Python 3.14 会被 CMake 优先选中，但该解释器既没有
+# Humble 所需的 Empy/numpy，也不与发行版 ABI 匹配。统一两个新旧 CMake
+# 查找变量，并保留 MYMIT_ROS_PYTHON_EXECUTABLE 供非标准安装显式覆盖。
+set(MYMIT_ROS_PYTHON_EXECUTABLE "/usr/bin/python3" CACHE FILEPATH
+  "Python interpreter matching the installed ROS 2 distribution")
+if(EXISTS "${MYMIT_ROS_PYTHON_EXECUTABLE}")
+  set(Python3_EXECUTABLE "${MYMIT_ROS_PYTHON_EXECUTABLE}" CACHE FILEPATH
+    "Python 3 interpreter used by ament" FORCE)
+  set(PYTHON_EXECUTABLE "${MYMIT_ROS_PYTHON_EXECUTABLE}" CACHE FILEPATH
+    "Python interpreter used by rosidl_generator_py" FORCE)
+else()
+  message(FATAL_ERROR
+    "MYMIT_ROS_PYTHON_EXECUTABLE does not exist: ${MYMIT_ROS_PYTHON_EXECUTABLE}")
+endif()
+
+# 使用 GLVND 而不是固定绑定 Mesa 的传统 libGL，运行时才能通过 PRIME 在
+# Intel 与 NVIDIA OpenGL 实现之间选择。
+if(POLICY CMP0072)
+  cmake_policy(SET CMP0072 NEW)
+endif()
+set(OpenGL_GL_PREFERENCE GLVND)
+
+# MPC/WBC 每个物理周期都会执行大量 Eigen 矩阵运算。未指定构建类型时，CMake
+# 默认不启用优化，会让交互仿真明显低于实时速度；默认使用 Release，同时仍允许
+# 调用者通过 --cmake-args -DCMAKE_BUILD_TYPE=... 显式覆盖。
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -10,6 +40,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(mujoco_vendor REQUIRED)
+find_package(OpenGL REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
@@ -51,6 +82,14 @@ install(DIRECTORY
   src/go1_description/urdf
   src/go1_description/config
   DESTINATION share/${PROJECT_NAME}
+)
+
+# DM1 是独立于 GO1 的第二套模型；两套资源同时安装，运行时由 main 选择。
+install(DIRECTORY src/dm1_description/dm1
+  DESTINATION share/${PROJECT_NAME}
+)
+install(DIRECTORY src/dm1_description/launch/
+  DESTINATION share/${PROJECT_NAME}/launch
 )
 
 # Use one MuJoCo ABI for the model library, sensors, tests, and GUI. The local
@@ -133,7 +172,8 @@ add_executable(mymit_robot_user
   user/SimulationBridge.cpp
 )
 target_compile_definitions(mymit_robot_user PRIVATE
-  MYMIT_ROBOT_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
+  MYMIT_ROBOT_GO1_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/go1_description/unitree_go1/scene.xml"
+  MYMIT_ROBOT_DM1_SCENE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/dm1_description/dm1/scene.xml"
 )
 target_include_directories(mymit_robot_user PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -150,6 +190,8 @@ target_link_libraries(mymit_robot_user
   Eigen3::Eigen
   /usr/local/lib/libmujoco.so
   /usr/local/lib/libsimulate.a
+  OpenGL::OpenGL
+  OpenGL::GLX
   glfw
   dl
   pthread

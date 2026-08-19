@@ -28,7 +28,7 @@ enum class FSM_StateName
 template < typename T >
 struct TransitionData
 {
-  bool done = false;
+  bool done = false;  ///< 当前状态到下一状态的过渡动作是否已经完成。
   void zero() noexcept {done = false;}
 };
 
@@ -63,17 +63,17 @@ public:
     checkForceFeedForward = false;
   }
 
-  FSM_StateName stateName;
-  std::string stateString;
-  FSM_StateName nextStateName;
-  T transitionDuration = T(0);
-  TransitionData < T > transitionData;
-  bool checkSafeOrientation = false;
-  bool checkPDesFoot = false;
-  bool checkForceFeedForward = false;
+  FSM_StateName stateName;      ///< 当前对象代表的固定状态枚举。
+  std::string stateString;      ///< 用于日志和界面显示的状态名称。
+  FSM_StateName nextStateName;  ///< checkTransition() 本周期选择的目标状态。
+  T transitionDuration = T(0);  ///< 状态过渡允许或计划使用的时间，s。
+  TransitionData < T > transitionData;  ///< 本次过渡的完成标志等运行数据。
+  bool checkSafeOrientation = false;     ///< 是否在该状态启用机身姿态安全检查。
+  bool checkPDesFoot = false;            ///< 是否检查期望足端位置是否越界。
+  bool checkForceFeedForward = false;    ///< 是否检查足端前馈力是否安全。
 
 protected:
-  ControlFSMData < T > *_data;
+  ControlFSMData < T > *_data;  ///< 非拥有指针，指向所有状态共享的控制数据。
 };
 
 #endif  // MYMIT_ROBOT_FSM_STATE_H_

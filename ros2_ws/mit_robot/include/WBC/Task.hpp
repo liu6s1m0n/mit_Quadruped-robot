@@ -59,16 +59,16 @@ protected:
   // Additional Update (defined in child classes)
   virtual bool _AdditionalUpdate() = 0;
 
-  bool b_set_task_;
-  size_t dim_task_;
+  bool b_set_task_;   ///< 本周期任务数据是否已经成功更新。
+  size_t dim_task_;   ///< 任务空间维数，例如位置任务为 3。
 
-  DVec<T> op_cmd_;
-  DVec<T> JtDotQdot_;
-  DMat<T> Jt_;
+  DVec<T> op_cmd_;      ///< 最终操作空间加速度命令，供 KinWBC/WBIC 使用。
+  DVec<T> JtDotQdot_;   ///< 任务雅可比变化造成的偏置加速度 Jdot*qdot。
+  DMat<T> Jt_;          ///< 任务雅可比，将广义速度映射到任务空间速度。
 
-  DVec<T> pos_err_;
-  DVec<T> vel_des_;
-  DVec<T> acc_des_;
+  DVec<T> pos_err_;  ///< 当前任务位置误差，定义为期望值减实际值。
+  DVec<T> vel_des_;  ///< 任务空间期望速度。
+  DVec<T> acc_des_;  ///< 任务空间前馈期望加速度。
 };
 
 #endif

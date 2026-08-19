@@ -45,7 +45,7 @@ TEST(LocomotionStateTest, LatchesSwingEndpointsUntilTouchdown)
     static_cast<Mat3<float> *>(nullptr), &nominal_foot_from_hip, LegId::RR);
   landing.y() = context.quadruped.hipLocation(LegId::RR).y() + nominal_foot_from_hip.y();
   expected.setFinalPosition(landing);
-  expected.setHeight(0.10F);
+  expected.setHeight(context.control_parameters.locomotion_swing_height);
   expected.computeSwingTrajectoryBezier(0.25F, 0.2F);
   EXPECT_TRUE(
     locomotion.footPositionTargetWorld(LegId::RR).isApprox(expected.getPosition(), 1.0e-5F));

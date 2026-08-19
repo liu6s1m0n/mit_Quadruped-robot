@@ -21,8 +21,23 @@ FSM_State_BalanceStand<T>::FSM_State_BalanceStand(
   //创建WBC
   wbc_ctrl_ = std::make_unique<LocomotionCtrl<T>>(
     model::makeFloatingBaseModel(*control_fsm_data->quadruped));
-  //参数1 权重越大越不修改机身加速度
-  wbc_ctrl_->setFloatingBaseWeight(T(1000));
+  const auto & parameters = *control_fsm_data->control_parameters;
+  if (control_fsm_data->quadruped->robotType() == RobotType::UNITREE_GO1) {
+    // GO1 继续采用原来经过回归验证的初始化顺序，避免无意义地重写
+    // WBC 默认参数后改变求解器的数值轨迹。
+    wbc_ctrl_->setFloatingBaseWeight(T(1000));
+  } else {
+    wbc_ctrl_->setBodyPositionGains(
+      parameters.balance_body_position_kp, parameters.balance_body_position_kd);
+    wbc_ctrl_->setBodyOrientationGains(
+      parameters.balance_body_orientation_kp,
+      parameters.balance_body_orientation_kd);
+    wbc_ctrl_->setJointGains(
+      parameters.balance_joint_kp, parameters.balance_joint_kd);
+    wbc_ctrl_->setFloatingBaseWeight(parameters.balance_floating_base_weight);
+    wbc_ctrl_->setReactionForceWeight(parameters.balance_reaction_force_weight);
+    wbc_ctrl_->setMaxNormalForce(parameters.maximum_normal_force);
+  }
 }
 
 /*仅在第一次启动，后续不会启动*/
@@ -38,13 +53,22 @@ void FSM_State_BalanceStand<T>::onEnter()
   //这样子就到导致了步行时刻突然切换站立直接翻到
   initial_body_position_ = this->_data->state_estimate->position_world;
   //如果估计的机身高度低于20厘米，就认为高度估计不可靠，强行设置为30厘米。
-  if (initial_body_position_.z() < T(0.2)) {initial_body_position_.z() = T(0.3);}
+  if (this->_data->quadruped->robotType() == RobotType::UNITREE_GO1) {
+    if (initial_body_position_.z() < T(0.2)) {initial_body_position_.z() = T(0.3);}
+  } else if (!this->_data->control_parameters->start_in_prone_home &&
+    initial_body_position_.z() <
+    this->_data->control_parameters->minimum_standing_height)
+  {
+    initial_body_position_.z() = this->_data->quadruped->nominalBodyHeight();
+  }
   //后续高度限制以这个高度为起点
   last_height_command_ = initial_body_position_.z();
   // 世界航向沿用进入状态时的实测值，但站立目标始终保持机身水平。不能把
   // 切换瞬间的 roll/pitch 锁存为目标，否则已有倾斜会被 WBC 永久维持。
   initial_body_rpy_ << T(0), T(0), this->_data->state_estimate->rpy.z();
-  body_weight_ = this->_data->quadruped->bodyInertia().mass * T(9.81);
+  body_weight_ = this->_data->quadruped->robotType() == RobotType::UNITREE_GO1 ?
+    this->_data->quadruped->bodyInertia().mass * T(9.81) :
+    this->_data->control_parameters->standing_supported_mass * T(9.81);
 }
 
 template<typename T>
@@ -138,11 +162,13 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
   }
   // 额外限制单周期下降量，防止高度滑块快速下拉造成腿部瞬时折叠。
   // 参数2 高度变化率
-  if (last_height_command_ - wbc_data_.pBody_des.z() > T(0.001)) {
-    wbc_data_.pBody_des.z() = last_height_command_ - T(0.001);
+  const T maximum_height_step =
+    this->_data->control_parameters->balance_height_step;
+  if (last_height_command_ - wbc_data_.pBody_des.z() > maximum_height_step) {
+    wbc_data_.pBody_des.z() = last_height_command_ - maximum_height_step;
   }
-  if (wbc_data_.pBody_des.z() - last_height_command_ > T(0.001)) {
-      wbc_data_.pBody_des.z() = last_height_command_ + T(0.001);
+  if (wbc_data_.pBody_des.z() - last_height_command_ > maximum_height_step) {
+      wbc_data_.pBody_des.z() = last_height_command_ + maximum_height_step;
   }
   last_height_command_ = wbc_data_.pBody_des.z();
 
@@ -180,20 +206,25 @@ void FSM_State_BalanceStand<T>::BalanceStandStep()
     //GO1默认home姿态大致是：髋外展角；大腿俯仰角；小腿/膝角。
     const Vec3<T> home = leg_model.joints.home_position;
     //GO1名义机身高度当前是：
-    const T nominal_height = this->_data->quadruped->nominalBodyHeight();
-    // 简化几何关系：高度比缩放腿的竖直投影，再由 acos 求大腿角度。
-    const T height_ratio = wbc_data_.pBody_des.z() / nominal_height;
-    //算出目标高度对应的角度，简单映射
-    const T cosine = std::clamp(
-      std::cos(home.y()) * height_ratio, T(0), T(1));
-    const T thigh_angle = std::acos(cosine);
-    //由home下的角度已经设定
-    command.position_desired << home.x(), thigh_angle, -T(2) * thigh_angle;
+    command.position_desired = home;
+    if (this->_data->control_parameters->use_go1_height_joint_mapping) {
+      const T nominal_height = this->_data->quadruped->nominalBodyHeight();
+      const T height_ratio = wbc_data_.pBody_des.z() / nominal_height;
+      const T cosine = std::clamp(
+        std::cos(home.y()) * height_ratio, T(0), T(1));
+      const T thigh_angle = std::acos(cosine);
+      command.position_desired << home.x(), thigh_angle, -T(2) * thigh_angle;
+    }
     command.position_desired = command.position_desired.cwiseMax(
       leg_model.joints.lower_limit).cwiseMin(leg_model.joints.upper_limit);
     command.velocity_desired.setZero();
-    command.kp_joint.setConstant(T(20));
-    command.kd_joint.setConstant(T(2));
+    if (this->_data->quadruped->robotType() == RobotType::UNITREE_GO1) {
+      command.kp_joint.setConstant(T(20));
+      command.kd_joint.setConstant(T(2));
+    } else {
+      command.kp_joint = this->_data->control_parameters->balance_joint_kp;
+      command.kd_joint = this->_data->control_parameters->balance_joint_kd;
+    }
   }
 }
 

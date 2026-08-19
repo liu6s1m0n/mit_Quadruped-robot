@@ -15,6 +15,7 @@ struct FsmContext
 {
   explicit FsmContext(float time_step)
   : quadruped(robots::unitree_go1::makeModel<float>()),
+    control_parameters(makeRobotControlParameters<float>(RobotType::UNITREE_GO1)),
     leg_controller(quadruped),
     gait_scheduler(time_step),
     control_time_step(time_step)
@@ -37,6 +38,7 @@ struct FsmContext
     // FSM 只借用这些对象，因此返回的控制数据保存的是非拥有指针。
     ControlFSMData<float> result;
     result.quadruped = &quadruped;
+    result.control_parameters = &control_parameters;
     result.state_estimate = &estimate;
     result.joint_states = &joints;
     result.leg_controller = &leg_controller;
@@ -47,6 +49,7 @@ struct FsmContext
   }
 
   Quadruped<float> quadruped;
+  RobotControlParameters<float> control_parameters;
   LegController<float> leg_controller;
   std::array<JointState<float>, kNumLegs> joints{};
   StateEstimate<float> estimate{};

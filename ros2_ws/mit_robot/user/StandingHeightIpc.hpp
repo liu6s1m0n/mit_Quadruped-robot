@@ -18,7 +18,8 @@ namespace standing_height_ipc
 {
 
 inline constexpr float kMinimumHeight = 0.18F;
-inline constexpr float kMaximumHeight = 0.34F;
+// 协议范围覆盖两种机型；每个 RobotRunner 还会按自己的 profile 再次限幅。
+inline constexpr float kMaximumHeight = 0.42F;
 inline constexpr float kDefaultHeight = 0.27F;
 inline constexpr std::uint32_t kCommandMagic = 0x4D485447U;
 inline constexpr char kSocketName[] = "mymit_robot_standing_height";

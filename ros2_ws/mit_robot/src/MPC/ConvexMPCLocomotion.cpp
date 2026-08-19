@@ -1,3 +1,8 @@
+/**
+ * @file ConvexMPCLocomotion.cpp
+ * @brief 步态、速度命令、预测轨迹和接触力求解器之间的 MPC 运行封装。
+ */
+
 #include "MPC/ConvexMPCLocomotion.h"
 
 #include <algorithm>
@@ -9,6 +14,10 @@
 namespace mpc
 {
 
+/**
+ * @brief 创建 STAND/TROT 步态和接触力求解器。
+ * @throws std::invalid_argument 当控制周期、求解间隔或预测窗非法时抛出。
+ */
 template<typename T>
 ConvexMPCLocomotion<T>::ConvexMPCLocomotion(
   const Quadruped<T> & quadruped, T control_time_step,
@@ -39,6 +48,7 @@ ConvexMPCLocomotion<T>::ConvexMPCLocomotion(
   }
 }
 
+/** @brief 清零内部计数、限幅命令和上一周期的反力缓存。 */
 template<typename T>
 void ConvexMPCLocomotion<T>::initialize() noexcept
 {
@@ -53,12 +63,17 @@ void ConvexMPCLocomotion<T>::initialize() noexcept
   cached_solution_converged_ = false;
 }
 
+/** @brief 将前向速度包装成平面速度命令。 */
 template<typename T>
 void ConvexMPCLocomotion<T>::setForwardVelocity(T velocity)
 {
   setVelocityCommand(velocity, T(0), T(0));
 }
 
+/**
+ * @brief 校验并保存机身坐标系速度命令。
+ * @throws std::invalid_argument 当平面速度或偏航速度超出限制时抛出。
+ */
 template<typename T>
 void ConvexMPCLocomotion<T>::setVelocityCommand(
   T forward_velocity, T lateral_velocity, T yaw_rate)
@@ -82,6 +97,12 @@ void ConvexMPCLocomotion<T>::setVelocityCommand(
   yaw_rate_ = yaw_rate;
 }
 
+/**
+ * @brief 将外部期望转换成 MPC 内部命令。
+ *
+ * 包括速度/偏航加速度限幅、偏航角连续化、机身坐标系速度到世界系速度
+ * 的转换，以及基于当前测量位置的短时预测起点设置。
+ */
 template<typename T>
 DesiredState<T> ConvexMPCLocomotion<T>::setupCommand(
   const StateEstimate<T> & estimate, const DesiredState<T> & desired)
@@ -136,6 +157,10 @@ DesiredState<T> ConvexMPCLocomotion<T>::setupCommand(
   return command;
 }
 
+/**
+ * @brief 设置当前支持的步态并使旧反力缓存失效。
+ * @throws std::invalid_argument 当前实现不支持指定步态时抛出。
+ */
 template<typename T>
 void ConvexMPCLocomotion<T>::setGait(GaitType gait)
 {
@@ -150,12 +175,19 @@ void ConvexMPCLocomotion<T>::setGait(GaitType gait)
   }
 }
 
+/** @brief 返回当前步态对象。 */
 template<typename T>
 OffsetDurationGait & ConvexMPCLocomotion<T>::activeGait() noexcept
 {
   return gait_type_ == GaitType::STAND ? stand_ : trot_;
 }
 
+/**
+ * @brief 执行一个高速控制周期的 MPC 封装流程。
+ *
+ * 每个周期更新命令和步态相位；达到求解周期或接触状态变化时，构造预测
+ * 轨迹并调用 SolverMPC。未触发求解时复用最近一次有效的第一步反力。
+ */
 template<typename T>
 LocomotionResult<T> ConvexMPCLocomotion<T>::run(
   const StateEstimate<T> & estimate, const DesiredState<T> & desired,

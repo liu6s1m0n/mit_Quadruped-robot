@@ -50,6 +50,7 @@ bool BodyOriTask<T>::update(
 {
   DVec<T> velocity = angular_velocity_body_desired;
   DVec<T> acceleration = angular_acceleration_body_desired;
+  /*在task文件中更新*/
   return this->UpdateTask(
     &orientation_world_from_body_desired, velocity, acceleration);
 }
@@ -90,7 +91,7 @@ bool BodyOriTask<T>::_UpdateCommand(
   } else {
     return false;
   }
-
+  /*此处为计算重点*/
   const Vec3<T> current_angular_velocity =
     model_state.bodyVelocity.template head<3>();
   const Vec3<T> desired_velocity = velocity_desired.template head<3>();
@@ -105,6 +106,7 @@ bool BodyOriTask<T>::_UpdateCommand(
   return this->pos_err_.allFinite() && this->op_cmd_.allFinite();
 }
 
+/** 姿态任务直接作用于浮动基座角速度 */
 template<typename T>
 bool BodyOriTask<T>::_UpdateTaskJacobian()
 {
@@ -113,6 +115,8 @@ bool BodyOriTask<T>::_UpdateTaskJacobian()
   return true;
 }
 
+/*当前实现假设姿态任务雅可比结构恒定，因此不计算非零的 \(\dot J_R\dot q\)。
+                               在完整刚体动力学建模中，任务加速度关系为：*/
 template<typename T>
 bool BodyOriTask<T>::_UpdateTaskJDotQdot()
 {

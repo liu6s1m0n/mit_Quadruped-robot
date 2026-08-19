@@ -13,6 +13,7 @@
 #include "controller/GaitScheduler.hpp"
 #include "controller/leg_controller.hpp"
 #include "model/quadruped.hpp"
+#include "model/robot_control_parameters.hpp"
 #include "model/robot_types.hpp"
 
 /** Non-owning references shared by the FSM states for one control cycle. */
@@ -22,6 +23,7 @@ struct ControlFSMData
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   const Quadruped < T > * quadruped = nullptr;
+  const RobotControlParameters<T> * control_parameters = nullptr;
   StateEstimate < T > *state_estimate = nullptr;
   const std::array < JointState < T >, kNumLegs > * joint_states = nullptr;
   LegController < T > *leg_controller = nullptr;
@@ -33,7 +35,8 @@ struct ControlFSMData
 
   bool valid() const noexcept
   {
-    return quadruped != nullptr && state_estimate != nullptr &&
+    return quadruped != nullptr && control_parameters != nullptr &&
+           state_estimate != nullptr &&
            joint_states != nullptr && leg_controller != nullptr &&
            gait_scheduler != nullptr && desired_state != nullptr &&
            std::isfinite(static_cast < double > (control_time_step)) &&

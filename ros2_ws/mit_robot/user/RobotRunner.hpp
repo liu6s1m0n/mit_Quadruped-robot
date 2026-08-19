@@ -17,6 +17,7 @@
 #include "controller/PositionVelocityEstimator.hpp"
 #include "controller/leg_controller.hpp"
 #include "model/quadruped.hpp"
+#include "model/robot_control_parameters.hpp"
 #include "sensor/imu.hpp"
 #include "sensor/leg.hpp"
 
@@ -27,7 +28,10 @@
 class RobotRunner
 {
 public:
-  RobotRunner(const mjModel * model, const mjData * data);
+  /** @brief 创建指定机型的完整控制管线。 */
+  RobotRunner(
+    mjModel * model, const mjData * data,
+    RobotType robot_type = RobotType::UNITREE_GO1);
   ~RobotRunner() = default;
 
   RobotRunner(const RobotRunner &) = delete;
@@ -38,6 +42,8 @@ public:
   /** 仿真 Reset 后清空控制器内部历史，但不会改写 MuJoCo 的物理状态。 */
   void reset();
   void setControlMode(ControlMode mode) noexcept;
+  /** 从 DM1 趴卧零位请求执行一次站起；条件不满足时返回 false。 */
+  bool requestStandUp() noexcept;
   /** 稳定站立时请求执行一次向前跳；条件不满足时返回 false。 */
   bool requestFrontJump() noexcept;
   /** 将前进速度透传给 ControlFSM 内的 Locomotion/MPC，单位 m/s。 */
@@ -49,8 +55,10 @@ public:
   void setStandingHeight(float height);
   void setDesiredState(const DesiredState<float> & desired);
 
-  static constexpr float minimumStandingHeight() noexcept {return 0.18F;}
-  static constexpr float maximumStandingHeight() noexcept {return 0.34F;}
+  float minimumStandingHeight() const noexcept
+  {return control_parameters_.minimum_standing_height;}
+  float maximumStandingHeight() const noexcept
+  {return control_parameters_.maximum_standing_height;}
   static constexpr float defaultWalkingForwardSpeed() noexcept {return 0.32F;}
   float standingHeightTarget() const noexcept {return standing_height_target_;}
   /*返回四条腿当前生成的最终关节命令。外部执行层可以读取它并写入：
@@ -63,6 +71,13 @@ public:
   const StateEstimate<float> & stateEstimate() const noexcept {return state_estimate_;}
   /*返回机器人模型*/
   const Quadruped<float> & quadruped() const noexcept {return quadruped_;}
+  /** 返回 FSM 当前实际状态，用于确认安全回退没有反复重置步态。 */
+  FSM_StateName currentStateName() const noexcept
+  {
+    return control_fsm_->currentStateName();
+  }
+  /** 当前是否已经处在允许行走的站立控制状态。 */
+  bool standingReady() const noexcept;
 
 private:
   /*保存四条腿传感器对象的所有权。*/
@@ -84,11 +99,14 @@ private:
   bool collectJointCommands();
   /*清零并关闭所有腿部输出。*/
   void disableCommands() noexcept;
+  /** 仅在 DM1 Home 启用整段小腿贴地代理，运动前关闭以免擦地。 */
+  void setHomeCalfContactsEnabled(bool enabled) noexcept;
  
   /*保存 MuJoCo 模型和当前数据。
     它们都是非拥有型指针，RobotRunner 不负责释放。*/
-  const mjModel * model_ = nullptr;
+  mjModel * model_ = nullptr;
   const mjData * data_ = nullptr;
+  RobotControlParameters<float> control_parameters_;  ///< GO1 或 DM1 独立控制参数。
   /*四足机器人模型。*/
   Quadruped<float> quadruped_;
   /*四腿控制器。保存腿部反馈；计算足端运动学；生成 JointCommand。*/

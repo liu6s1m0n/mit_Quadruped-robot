@@ -156,6 +156,21 @@ public:
   size_t getNumGroundContacts() const noexcept {return _nGroundContact;}
   /** @brief 返回当前模型状态。 */
   const FBModelState<T> & getState() const noexcept {return _state;}
+  /** @brief 设置“电机读数 -> 机械关节角”的常量零位偏置。 */
+  void setJointPositionOffsets(const DVec<T> & offsets)
+  {
+    if (offsets.size() != static_cast<Eigen::Index>(getNumActuatedDof()) ||
+      !offsets.allFinite())
+    {
+      throw std::invalid_argument("joint position offsets have invalid size or values");
+    }
+    _jointPositionOffsets = offsets;
+  }
+  /** @brief 返回各驱动关节的机械零位偏置，顺序与模型 q 一致。 */
+  const DVec<T> & getJointPositionOffsets() const noexcept
+  {
+    return _jointPositionOffsets;
+  }
   /** @brief 返回足端接触点在全部接触点中的索引。 */
   const std::vector < uint64_t > & getFootIndices() const noexcept {return _footIndicesGC;}
   const std::vector < size_t > & getGroundContactParents() const noexcept {return _gcParent;}
@@ -390,6 +405,7 @@ public:
   /// 算法辅助变量开始
   FBModelState < T > _state;
   FBModelStateDerivative < T > _dState;
+  DVec<T> _jointPositionOffsets;  ///< 机械角 = 电机读数 + 本偏置。
 
   vectorAligned < SVec < T >> _v, _vrot, _a, _arot, _avp, _avprot, _c, _crot, _S,
   _Srot, _fvp, _fvprot, _ag, _agrot, _f, _frot;

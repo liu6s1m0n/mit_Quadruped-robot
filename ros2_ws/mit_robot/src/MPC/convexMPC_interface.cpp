@@ -1,3 +1,10 @@
+/**
+ * @file convexMPC_interface.cpp
+ * @brief 旧版凸 MPC C ABI 的全局数据、参数更新和结果访问实现。
+ *
+ * 本文件保留历史数组接口；现代 C++ MPC 主链不从这里进入。
+ */
+
 #include "convexMPC_interface.h"
 #include "common_types.h"
 #include "SolverMPC.h"
@@ -21,6 +28,7 @@ pthread_t solve_thread;
 
 u8 first_run = 1;
 
+/** @brief 初始化旧版 MPC 接口使用的互斥量和调试状态。 */
 void initialize_mpc()
 {
   //printf("Initializing MPC!\n");
@@ -41,6 +49,13 @@ void initialize_mpc()
 #endif
 }
 
+/**
+ * @brief 设置旧版求解问题参数并调整 QP 矩阵尺寸。
+ * @param dt 预测离散时间间隔。
+ * @param horizon 预测窗长度。
+ * @param mu 摩擦系数。
+ * @param f_max 最大法向力。
+ */
 void setup_problem(double dt, int horizon, double mu, double f_max)
 {
   //mu = 0.6;
@@ -68,12 +83,14 @@ void setup_problem(double dt, int horizon, double mu, double f_max)
 }
 
 //inline to motivate gcc to unroll the loop in here.
+/** @brief 将旧版 double 数组转换为 float 数组。 */
 inline void mfp_to_flt(flt* dst, mfp* src, s32 n_items)
 {
   for(s32 i = 0; i < n_items; i++)
     *dst++ = *src++;
 }
 
+/** @brief 将旧版整数接触表转换为 uint8 数组。 */
 inline void mint_to_u8(u8* dst, mint* src, s32 n_items)
 {
   for(s32 i = 0; i < n_items; i++)
@@ -86,7 +103,10 @@ int has_solved = 0;
 //{
 //  solve_mpc(&update, &problem_configuration);
 //}
-//safely copies problem data and starts the solver
+/**
+ * @brief 接收 double 原始数组，复制到旧版全局数据并启动求解。
+ * @note 这是历史 C ABI 入口，现代代码优先使用 SolverMPC::solve()。
+ */
 void update_problem_data(double* p, double* v, double* q, double* w, double* r, double yaw, double* weights, double* state_trajectory, double alpha, int* gait)
 {
   mfp_to_flt(update.p,p,3);
@@ -106,6 +126,7 @@ void update_problem_data(double* p, double* v, double* q, double* w, double* r, 
   has_solved = 1;
 }
 
+/** @brief 更新旧版迭代求解器参数。 */
 void update_solver_settings(int max_iter, double rho, double sigma, double solver_alpha, double terminate, double use_jcqp) {
   update.max_iterations = max_iter;
   update.rho = rho;
@@ -120,6 +141,7 @@ void update_solver_settings(int max_iter, double rho, double sigma, double solve
     update.use_jcqp = 0;
 }
 
+/** @brief 接收 float 原始数组，复制到旧版全局数据并启动求解。 */
 void update_problem_data_floats(float* p, float* v, float* q, float* w,
                                 float* r, float yaw, float* weights,
                                 float* state_trajectory, float alpha, int* gait)
@@ -139,10 +161,16 @@ void update_problem_data_floats(float* p, float* v, float* q, float* w,
 
 }
 
+/** @brief 更新旧版 x 方向阻力补偿参数。 */
 void update_x_drag(float x_drag) {
   update.x_drag = x_drag;
 }
 
+/**
+ * @brief 读取旧版求解器输出。
+ * @param index 输出数组下标。
+ * @return 未求解时返回 0，否则返回对应元素。
+ */
 double get_solution(int index)
 {
   if(!has_solved) return 0.f;

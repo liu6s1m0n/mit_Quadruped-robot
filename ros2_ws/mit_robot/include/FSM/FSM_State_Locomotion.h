@@ -72,8 +72,10 @@ private:
   std::array < FootSwingTrajectory < T >, kNumLegs > swing_trajectories_ {};
   /*记录每条腿是否已经开始当前摆动周期。*/
   std::array < bool, kNumLegs > swing_active_ {};
-  /*参数1：摆动腿抬脚高度。保持 0.10 m，不再用增加高度间接提高速度。*/
+  /*摆动腿抬脚高度，由 GO1/DM1 各自控制参数在构造时覆盖。*/
   T swing_height_ = T(0.10);
+  /*足端相对髋的横向安全边界，必须容纳该机型名义足宽和横移步长。*/
+  T maximum_lateral_foot_offset_ = T(0.18);
   /*参数2：单个步周期内最大水平步长为 18 cm。 -> 0.20*/
   T maximum_step_length_ = T(0.15);
   /*只提高摆动腿的关节速度前馈：Hip保持原速以稳定支撑宽度，

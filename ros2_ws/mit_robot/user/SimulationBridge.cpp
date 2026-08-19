@@ -27,6 +27,7 @@
 #include "RobotRunner.hpp"
 #include "SimulationDiagnostics.hpp"
 #include "StandingHeightIpc.hpp"
+#include "model/robot_control_parameters.hpp"
 
 namespace mj = ::mujoco;
 
@@ -37,6 +38,7 @@ using MjuiAddFunction = void (*)(mjUI *, const mjuiDef *);
 using MjuiEventFunction = mjuiItem * (*)(mjUI *, mjuiState *, const mjrContext *);
 double * g_standing_height_slider = nullptr;
 std::array<int, 6> * g_direction_toggles = nullptr;
+std::atomic<bool> * g_stand_up_requested = nullptr;
 std::atomic<bool> * g_front_jump_requested = nullptr;
 
 enum DirectionIndex : std::size_t
@@ -99,7 +101,7 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
     {mjITEM_SEPARATOR, "Robot controller", 1, nullptr, "", 0},
     {
       mjITEM_SLIDERNUM, "Height (m)", 2,
-      g_standing_height_slider, "0.18 0.34", 0
+      g_standing_height_slider, "0.18 0.42", 0
     },
     {mjITEM_CHECKINT, "Forward slow", 2, &(*g_direction_toggles)[kForwardSlow], "", 0},
     {mjITEM_CHECKINT, "Forward fast", 2, &(*g_direction_toggles)[kForwardFast], "", 0},
@@ -107,6 +109,7 @@ extern "C" void mjui_add(mjUI * ui, const mjuiDef * definition)
     {mjITEM_CHECKINT, "Left", 2, &(*g_direction_toggles)[kLeft], "", 0},
     {mjITEM_CHECKINT, "Right", 2, &(*g_direction_toggles)[kRight], "", 0},
     {mjITEM_CHECKINT, "Rotate CCW", 2, &(*g_direction_toggles)[kRotate], "", 0},
+    {mjITEM_BUTTON, "Stand up", 2, nullptr, "", 0},
     {mjITEM_BUTTON, "Jump forward", 2, nullptr, "", 0},
     {mjITEM_END, "", 0, nullptr, "", 0}
   };
@@ -124,6 +127,12 @@ extern "C" mjuiItem * mjui_event(
     std::abort();
   }
   mjuiItem * changed = event(ui, state, context);
+  if (changed != nullptr && changed->type == mjITEM_BUTTON &&
+    std::strcmp(changed->name, "Stand up") == 0 &&
+    g_stand_up_requested != nullptr)
+  {
+    g_stand_up_requested->store(true);
+  }
   if (changed != nullptr && changed->type == mjITEM_BUTTON &&
     std::strcmp(changed->name, "Jump forward") == 0 &&
     g_front_jump_requested != nullptr)
@@ -302,8 +311,9 @@ void writeCommands(
 }
 
 void runPhysics(
-  mj::Simulate & simulation, const std::string & scene_path,
+  mj::Simulate & simulation, const std::string & scene_path, RobotType robot_type,
   std::atomic<float> & standing_height, double & standing_height_slider,
+  std::atomic<bool> & stand_up_requested,
   std::atomic<bool> & front_jump_requested,
   std::array<int, 6> & direction_toggles, float slow_walking_forward_speed,
   float fast_walking_forward_speed, float walking_backward_speed,
@@ -325,49 +335,62 @@ void runPhysics(
     if (home_keyframe < 0) {
       throw std::runtime_error("MuJoCo model is missing the required home keyframe");
     }
-    // mj_makeData 使用模型默认 qpos（腿关节为零），并不是 GO1 的站立姿态。
-    // 控制器启动前先加载 home，避免机器人在关节初始化阶段从高处坠落并后仰。
+    // GO1 的 home 是站姿；DM1 的 home 是十二电机零位对应的趴卧姿态。
     mj_resetDataKeyframe(model, data, home_keyframe);
     mj_forward(model, data);
     const JointAddresses addresses = findJointAddresses(model);
-    RobotRunner runner(model, data);
+    RobotRunner runner(model, data, robot_type);
     SimulationDiagnostics diagnostics(model);
     StandingHeightReceiver height_receiver;
 
     simulation.Load(model, data, scene_path.c_str());
     std::printf(
-      "MuJoCo GO1 control started: dt=%.4f s, slow/fast=%.2f/%.2f m/s, "
+      "MuJoCo %s control started: dt=%.4f s, slow/fast=%.2f/%.2f m/s, "
       "backward=%.2f m/s, lateral=%.2f m/s, turning=%.2f rad/s, "
-      "default mode=BalanceStand/WBC\n",
+      "default mode=%s\n",
+      robot_type == RobotType::UNITREE_GO1 ? "GO1" : "DM1",
       model->opt.timestep, slow_walking_forward_speed, fast_walking_forward_speed,
-      walking_backward_speed, walking_lateral_speed, turning_yaw_rate);
+      walking_backward_speed, walking_lateral_speed, turning_yaw_rate,
+      robot_type == RobotType::UNITREE_GO1 ? "BalanceStand/WBC" :
+      "prone motor-zero hold (press Stand up)");
 
     bool controller_ready = false;
     std::size_t consecutive_failures = 0;
     double previous_simulation_time = data->time;
     float previous_slider_height = standing_height.load();
     std::array<int, 6> previous_direction_toggles{};
-    int previous_direction = -2;
+    int previous_direction = -1;
+    // 物理仿真按模型 timestep 与墙钟同步。Release 构建通常会提前完成控制计算，
+    // 剩余时间专门留给 GLFW 渲染线程，避免物理线程无限抢占共享锁。
+    using PhysicsClock = std::chrono::steady_clock;
+    const auto physics_period = std::chrono::duration_cast<PhysicsClock::duration>(
+      std::chrono::duration<double>(model->opt.timestep));
+    auto next_physics_deadline = PhysicsClock::now();
+    bool was_running = false;
     while (!simulation.exitrequest.load()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       std::unique_lock<std::recursive_mutex> lock(simulation.mtx);
+      const bool simulation_running = simulation.run != 0;
       // MuJoCo Reset 会让仿真时间回退，据此重置估计器和 FSM 内部历史。
       if (data->time + 0.5 * model->opt.timestep < previous_simulation_time) {
-        // UI Reset 默认会回到零关节角；统一恢复为与控制器参数一致的 home 站姿。
+        // Reset 后 GO1 回站姿，DM1 回到十二电机零位的趴卧 home。
         mj_resetDataKeyframe(model, data, home_keyframe);
         mj_forward(model, data);
         runner.reset();
         diagnostics.reset();
         controller_ready = false;
         consecutive_failures = 0;
-        previous_direction = -2;
+        previous_direction = -1;
         std::printf(
           "MuJoCo reset detected: robot and controller restored to home posture\n");
       }
       previous_simulation_time = data->time;
       height_receiver.receive(standing_height);
-      const float commanded_height = synchronizeStandingHeight(
+      float commanded_height = synchronizeStandingHeight(
         standing_height_slider, previous_slider_height, standing_height);
+      commanded_height = std::clamp(
+        commanded_height, runner.minimumStandingHeight(), runner.maximumStandingHeight());
+      standing_height.store(commanded_height);
+      standing_height_slider = commanded_height;
       // 六个运动开关互斥：新打开的开关取得控制权，关闭当前开关则回到站立。
       int requested_direction = -1;
       for (std::size_t index = 0; index < direction_toggles.size(); ++index) {
@@ -395,6 +418,12 @@ void runPhysics(
       previous_direction_toggles = direction_toggles;
 
       if (requested_direction != previous_direction) {
+        if (requested_direction >= 0 && !runner.standingReady()) {
+          for (int & toggle : direction_toggles) {toggle = 0;}
+          previous_direction_toggles = direction_toggles;
+          requested_direction = -1;
+          std::printf("Motion ignored: press Stand up and wait for BalanceStand\n");
+        }
         float forward_velocity = 0.0F;
         float lateral_velocity = 0.0F;
         float yaw_rate = 0.0F;
@@ -438,7 +467,18 @@ void runPhysics(
         std::printf("Robot direction set to %s\n", direction_name);
         previous_direction = requested_direction;
       }
-      if (simulation.run) {
+      if (simulation_running) {
+        if (stand_up_requested.exchange(false)) {
+          if (runner.requestStandUp()) {
+            for (int & toggle : direction_toggles) {toggle = 0;}
+            previous_direction_toggles = direction_toggles;
+            previous_direction = -1;
+            diagnostics.reset();
+            std::printf("Stand-up request accepted\n");
+          } else {
+            std::printf("Stand up ignored: initialization incomplete or robot already standing\n");
+          }
+        }
         if (front_jump_requested.exchange(false)) {
           if (runner.requestFrontJump()) {
             for (int & toggle : direction_toggles) {toggle = 0;}
@@ -487,6 +527,27 @@ void runPhysics(
         // 暂停时只刷新运动学量，不推进时间，也不运行控制器。
         mj_forward(model, data);
       }
+      // 必须先释放共享锁再等待，否则 RenderLoop 会被物理线程一起阻塞。
+      lock.unlock();
+      if (simulation_running) {
+        const auto now = PhysicsClock::now();
+        if (!was_running) {next_physics_deadline = now;}
+        next_physics_deadline += physics_period;
+        if (now < next_physics_deadline) {
+          std::this_thread::sleep_until(next_physics_deadline);
+        } else if (now - next_physics_deadline > physics_period * 4) {
+          // 调试断点、窗口拖动等长暂停后从当前墙钟重新同步，不连续追赶旧帧。
+          next_physics_deadline = now;
+          std::this_thread::yield();
+        } else {
+          // 单帧轻微超时时仍让渲染线程获得调度机会。
+          std::this_thread::yield();
+        }
+      } else {
+        next_physics_deadline = PhysicsClock::now();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      was_running = simulation_running;
     }
   } catch (...) {
     failure = std::current_exception();
@@ -499,20 +560,23 @@ void runPhysics(
 
 }  // namespace
 
-SimulationBridge::SimulationBridge(std::string scene_path)
-: scene_path_(std::move(scene_path))
+SimulationBridge::SimulationBridge(std::string scene_path, RobotType robot_type)
+: scene_path_(std::move(scene_path)), robot_type_(robot_type)
 {
   if (scene_path_.empty()) {throw std::invalid_argument("scene path must not be empty");}
 }
 
 void SimulationBridge::setStandingHeight(float height)
 {
-  if (!std::isfinite(height) || height < standing_height_ipc::kMinimumHeight ||
-    height > standing_height_ipc::kMaximumHeight)
+  const auto parameters = makeRobotControlParameters<float>(robot_type_);
+  if (!std::isfinite(height) || height < parameters.minimum_standing_height ||
+    height > parameters.maximum_standing_height)
   {
-    throw std::invalid_argument("standing height must be within [0.18, 0.34] m");
+    throw std::invalid_argument("standing height is outside the selected robot profile");
   }
   standing_height_.store(height);
+  // run() 启动物理线程前此处仅由 main 调用，因此可同步初始化 UI 缓存。
+  standing_height_slider_ = height;
 }
 
 void SimulationBridge::setSlowWalkingForwardSpeed(float speed)
@@ -563,8 +627,27 @@ int SimulationBridge::run()
   mjvPerturb perturbation;
   mjv_defaultPerturb(&perturbation);
   auto glfw_adapter = std::make_unique<mj::GlfwAdapter>();
+  const auto * gl_vendor = reinterpret_cast<const char *>(glGetString(GL_VENDOR));
+  const auto * gl_renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
+  std::printf(
+    "OpenGL renderer: vendor=%s, device=%s\n",
+    gl_vendor == nullptr ? "unknown" : gl_vendor,
+    gl_renderer == nullptr ? "unknown" : gl_renderer);
+  const char * requested_gl_vendor = std::getenv("__GLX_VENDOR_LIBRARY_NAME");
+  if (requested_gl_vendor != nullptr &&
+    std::strcmp(requested_gl_vendor, "nvidia") == 0 &&
+    (gl_vendor == nullptr || std::strstr(gl_vendor, "NVIDIA") == nullptr))
+  {
+    std::fprintf(
+      stderr,
+      "NVIDIA rendering was requested but GLX selected %s. "
+      "Install the matching NVIDIA OpenGL userspace package "
+      "(libnvidia-gl-595 on this machine), then log out and back in.\n",
+      gl_vendor == nullptr ? "an unknown renderer" : gl_vendor);
+  }
   g_standing_height_slider = &standing_height_slider_;
   g_direction_toggles = &direction_toggles_;
+  g_stand_up_requested = &stand_up_requested_;
   g_front_jump_requested = &front_jump_requested_;
   auto simulation = std::make_unique<mj::Simulate>(
     std::move(glfw_adapter), &camera, &options, &perturbation, false);
@@ -572,8 +655,9 @@ int SimulationBridge::run()
 
   std::exception_ptr failure;
   std::thread physics(
-    runPhysics, std::ref(*simulation), std::cref(scene_path_),
+    runPhysics, std::ref(*simulation), std::cref(scene_path_), robot_type_,
     std::ref(standing_height_), std::ref(standing_height_slider_),
+    std::ref(stand_up_requested_),
     std::ref(front_jump_requested_),
     std::ref(direction_toggles_), slow_walking_forward_speed_,
     fast_walking_forward_speed_, walking_backward_speed_, walking_lateral_speed_,
@@ -582,6 +666,7 @@ int SimulationBridge::run()
   physics.join();
   g_standing_height_slider = nullptr;
   g_direction_toggles = nullptr;
+  g_stand_up_requested = nullptr;
   g_front_jump_requested = nullptr;
   if (failure != nullptr) {std::rethrow_exception(failure);}
   return 0;

@@ -1,3 +1,8 @@
+/**
+ * @file SolverMPC.cpp
+ * @brief 有限时域接触力 MPC 的预测模型、代价函数和投影梯度求解实现。
+ */
+
 #include "MPC/SolverMPC.h"
 
 #include <algorithm>
@@ -12,6 +17,10 @@ namespace mpc
 namespace
 {
 
+/**
+ * @brief 构造叉乘矩阵，使 skew(r)f = r × f。
+ * @tparam T 标量类型。
+ */
 template<typename T>
 Mat3<T> skew(const Vec3<T> & value)
 {
@@ -24,6 +33,10 @@ Mat3<T> skew(const Vec3<T> & value)
 
 }  // namespace
 
+/**
+ * @brief 检查 MPC 预测和接触力约束参数。
+ * @return 参数全部有限且满足正值/上下界关系时返回 true。
+ */
 template<typename T>
 bool SolverSettings<T>::isValid() const noexcept
 {
@@ -34,6 +47,10 @@ bool SolverSettings<T>::isValid() const noexcept
     maximum_iterations > 0 && convergence_tolerance > T(0);
 }
 
+/**
+ * @brief 构造并校验接触力 MPC 求解器。
+ * @throws std::invalid_argument settings 非法时抛出。
+ */
 template<typename T>
 SolverMPC<T>::SolverMPC(
   const Quadruped<T> & quadruped, const SolverSettings<T> & settings)
@@ -42,7 +59,11 @@ SolverMPC<T>::SolverMPC(
   if (!settings_.isValid()) {throw std::invalid_argument("invalid MPC settings");}
 }
 
-//把目标状态压缩成 12 维向量
+/**
+ * @brief 将目标状态按求解器约定压缩为 12 维向量。
+ *
+ * 排列为 @f$[rpy, p, \dot{rpy}, v]@f$。
+ */
 template<typename T>
 DVec<T> SolverMPC<T>::desiredVector(const DesiredState<T> & desired) const
 {
@@ -55,6 +76,11 @@ DVec<T> SolverMPC<T>::desiredVector(const DesiredState<T> & desired) const
   return result;
 }
 
+/**
+ * @brief 将一只脚的力投影到接触约束和线性摩擦锥内。
+ * @param force 待投影的世界系接触力，会被原地修改。
+ * @param contact true 表示支撑脚，false 表示摆动脚。
+ */
 template<typename T>
 void SolverMPC<T>::projectForce(Vec3<T> & force, bool contact) const noexcept
 {
@@ -62,13 +88,23 @@ void SolverMPC<T>::projectForce(Vec3<T> & force, bool contact) const noexcept
   if (!contact) {force.setZero(); return;}
   force.z() = std::clamp(
     force.z(), settings_.minimum_normal_force, settings_.maximum_normal_force);
+
   const T tangential_limit = settings_.friction_coefficient * force.z();
   const T tangential_norm = force.template head<2>().norm();
+
   if (tangential_norm > tangential_limit && tangential_norm > T(0)) {
     force.template head<2>() *= tangential_limit / tangential_norm;
   }
 }
 
+/**
+ * @brief 求解预测窗内所有腿的最优接触反力。
+ *
+ * 目标函数近似为
+ * @f$\min_F\frac12\|W(PF+x_0-x_d)\|^2
+ * +\frac{\rho}{2}\|F\|^2@f$，每次梯度更新后将各腿反力投影到
+ * 接触开关、法向力范围和摩擦锥约束中。
+ */
 template<typename T>
 SolverResult<T> SolverMPC<T>::solve(
   const RobotState<T> & state, const std::vector<DesiredState<T>> & trajectory,
@@ -89,14 +125,18 @@ SolverResult<T> SolverMPC<T>::solve(
 
   constexpr Eigen::Index state_dimension = 12;
   const Eigen::Index input_dimension = static_cast<Eigen::Index>(horizon * 12);
-  // 离散状态转移采用短时间内速度恒定的线性模型。
+  // 离散状态转移采用短时间内速度恒定的线性模型。A
   // 状态顺序为 [rpy, position, rpy_rate, linear_velocity]。
   DMat<T> transition = DMat<T>::Identity(state_dimension, state_dimension);
   transition.block(0, 6, 3, 3) = settings_.time_step * Mat3<T>::Identity();
   transition.block(3, 9, 3, 3) = settings_.time_step * Mat3<T>::Identity();
 
   const T mass = quadruped_->totalMass();
-  // 模型保存的是机身坐标系惯量，计算世界系角加速度前先旋转到世界坐标系。
+  /* L = IW  R^T = R^-1
+     Lworld = R * Lbody
+     Wworld = R * Wbody
+     Iworld = R * Ibody * R^T*/
+  // 模型保存的是机身坐标系惯量，计算世界系角加速度前先旋转到世界坐标系。 惯量的算法跟坐标转化算法不一样
   const Mat3<T> inertia_world = state.rotation_world_from_body *
     quadruped_->bodyInertia().inertia_com * state.rotation_world_from_body.transpose();
   //惯量有效性
@@ -112,8 +152,9 @@ SolverResult<T> SolverMPC<T>::solve(
   initial << state.rpy, state.position_world, state.rpy_rate,
     state.velocity_world;
   DVec<T> free_state = initial;
-  //预测矩阵的含义
-  // prediction 描述“整个力序列对未来状态的影响”，free_prediction 是无足端力时的轨迹。
+  /*预测矩阵的含义
+   * prediction 描述“整个力序列对未来状态的影响”，free_prediction 是无足端力时的轨迹。
+   */
   DMat<T> sensitivity = DMat<T>::Zero(state_dimension, input_dimension);
   DMat<T> prediction = DMat<T>::Zero(
     static_cast<Eigen::Index>(horizon) * state_dimension, input_dimension);
@@ -134,11 +175,12 @@ SolverResult<T> SolverMPC<T>::solve(
   const Mat3<T> world_angular_acceleration_to_rpy_acceleration =
     body_angular_velocity_to_rpy_rate *
     state.rotation_world_from_body.transpose();
+
   for (std::size_t step = 0; step < horizon; ++step) {
   // 逐步展开线性系统，构造预测时域内的状态响应矩阵。
   //预测无足端力状态
     free_state = transition * free_state;
-  // 状态第 9～11 项是线速度，因此
+  // 考虑重力对机身的影响
     free_state.template segment<3>(9) += settings_.time_step * gravity;
   //更新敏感度矩阵 第 0 步施加的力会影响第 1 步速度；
   //也会影响第 2 步、第 3 步的位置和姿态。
@@ -146,29 +188,43 @@ SolverResult<T> SolverMPC<T>::solve(
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
       DMat<T> input = DMat<T>::Zero(state_dimension, 3);
       const Vec3<T> lever = state.foot_position_world[leg] - state.position_world;
+      /*
+      τ = skew(r) * F =  r x F x是叉乘
+        Wworld = （Iworld）^-1 * τ
+        drpy = dt * E(rpy)R^T*Wworld
+      */
       input.block(6, 0, 3, 3) =
         settings_.time_step * world_angular_acceleration_to_rpy_acceleration *
         inertia_inverse * skew(lever);
-      input.block(9, 0, 3, 3) =
+      /*
+        ΔVx              1 0 0   Fx
+        ΔVy = (Δt/m)  *  0 1 0 * Fy
+        ΔVz              0 0 1   Fz
+      */
+      input.block(9, 0, 3, 3) = 
         settings_.time_step * Mat3<T>::Identity() / mass;
       //把当前输入放入完整敏感度矩阵
         sensitivity.block(0, static_cast<Eigen::Index>(step * 12 + leg * 3), 12, 3) = input;
     }
+    /*计算当前预测状态在大向量中的起始位置*/
     const Eigen::Index row = static_cast<Eigen::Index>(step) * state_dimension;
     prediction.block(row, 0, state_dimension, input_dimension) = sensitivity;
     free_prediction.segment(row, state_dimension) = free_state;
     desired_prediction.segment(row, state_dimension) = desiredVector(trajectory[step]);
   }
-
+  /*设置权重*/
   DVec<T> weights(state_dimension);
   // 权重越大，代表对应状态的跟踪优先级越高；此处尤其重视机身高度和横滚/俯仰。
-  weights << T(20), T(20), T(10), T(2), T(2), T(50),
-    T(0.2), T(0.2), T(0.2), T(1), T(1), T(2);
+  weights << T(20), T(20), T(10),  /*Roll  Pitch  Yaw*/
+             T(2),  T(2),  T(50),  /*x     y      z*/
+             T(0.2),T(0.2),T(0.2), /*vRoll vPitch vYaw*/
+             T(1),  T(1),  T(2);   /*vx    vy     vz*/
   DVec<T> repeated_weights(static_cast<Eigen::Index>(horizon) * state_dimension);
   for (std::size_t step = 0; step < horizon; ++step) {
     repeated_weights.segment(static_cast<Eigen::Index>(step) * state_dimension, state_dimension) =
       weights;
   }
+
   const DMat<T> weighted_prediction = repeated_weights.asDiagonal() * prediction;
   const DVec<T> weighted_error = repeated_weights.asDiagonal() *
     (free_prediction - desired_prediction);
@@ -197,10 +253,10 @@ SolverResult<T> SolverMPC<T>::solve(
       }
     }
   }
-
+  //迭代函数开始迭代
   for (std::size_t iteration = 0; iteration < settings_.maximum_iterations; ++iteration) {
     const DVec<T> previous = forces;
-    // 一次无约束梯度下降后，将每只脚的力重新投影到接触与摩擦约束中。
+    // 一次无约束梯度下降后，将每只脚的力重新投影到接触与摩擦约束中。 
     forces -= step_size * (hessian * forces + gradient_offset);
     for (std::size_t step = 0; step < horizon; ++step) {
       for (std::size_t leg = 0; leg < kNumLegs; ++leg) {

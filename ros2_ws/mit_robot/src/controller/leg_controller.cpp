@@ -286,54 +286,67 @@ void computeLegJacobianAndPosition(
 {
   // 由 LegId 取得这一条腿的模型参数；不直接访问具体 GO1 参数文件。
   const auto & leg = quad.leg(leg_id);
-  // l1：Hip 横向连杆；l2：大腿；l3：小腿。;l
-  const T l1 = leg.hip_link_length;
-  const T l2 = leg.thigh_link_length;
-  const T l3 = leg.calf_link_length;
-  // 左腿为 +1，右腿为 -1，用于处理 Hip 横向连杆的镜像关系。
-  const T side_sign = quad.sideSign(leg_id);
-  
-  /*Hip 外展 (q0)	绕 X 轴	腿向外摆（侧向运动）
-    Thigh 俯仰 (q1)	绕 Y 轴	大腿向前摆动（朝 -X）
-    Calf 俯仰 (q2)	绕 Y 轴	小腿向前摆动（朝 -X）*/
-  // 缓存三个关节角的正弦和余弦，避免在位置和雅可比公式中重复计算。
-  const T s1 = std::sin(q(0));
-  const T s2 = std::sin(q(1));
-  const T s3 = std::sin(q(2));
-  const T c1 = std::cos(q(0));
-  const T c2 = std::cos(q(1));
-  const T c3 = std::cos(q(2));
-  // calf 的绝对俯仰方向由 q(1)+q(2) 决定，使用和角公式提前计算。
-  const T c23 = c2 * c3 - s2 * s3;
-  const T s23 = s2 * c3 + c2 * s3;
+  if (quad.robotType() == RobotType::UNITREE_GO1) {
+    // 保留 GO1 已通过长期仿真回归的解析公式，避免改变其浮点运算路径。
+    const T l1 = leg.hip_link_length;
+    const T l2 = leg.thigh_link_length;
+    const T l3 = leg.calf_link_length;
+    const T side_sign = quad.sideSign(leg_id);
+    const T s1 = std::sin(q(0));
+    const T s2 = std::sin(q(1));
+    const T s3 = std::sin(q(2));
+    const T c1 = std::cos(q(0));
+    const T c2 = std::cos(q(1));
+    const T c3 = std::cos(q(2));
+    const T c23 = c2 * c3 - s2 * s3;
+    const T s23 = s2 * c3 + c2 * s3;
+    if (J != nullptr) {
+      (*J)(0, 0) = T(0);
+      (*J)(0, 1) = -l3 * c23 - l2 * c2;
+      (*J)(0, 2) = -l3 * c23;
+      (*J)(1, 0) = l3 * c1 * c23 + l2 * c1 * c2 - l1 * side_sign * s1;
+      (*J)(1, 1) = -l3 * s1 * s23 - l2 * s1 * s2;
+      (*J)(1, 2) = -l3 * s1 * s23;
+      (*J)(2, 0) = l3 * s1 * c23 + l2 * c2 * s1 + l1 * side_sign * c1;
+      (*J)(2, 1) = l3 * c1 * s23 + l2 * c1 * s2;
+      (*J)(2, 2) = l3 * c1 * s23;
+    }
+    if (p != nullptr) {
+      (*p)(0) = -l3 * s23 - l2 * s2;
+      (*p)(1) = l1 * side_sign * c1 + l3 * s1 * c23 + l2 * c2 * s1;
+      (*p)(2) = l1 * side_sign * s1 - l3 * c1 * c23 - l2 * c1 * c2;
+    }
+    return;
+  }
+  // 把现场校零后的电机读数还原为机械关节角，再计算通用串联链运动学。
+  const Vec3<T> mechanical_q = q + leg.joints.zero_offset;
+  const Mat3<T> rotation_hip =
+    Eigen::AngleAxis<T>(
+    mechanical_q(0), leg.joints.joint_axes.col(0)).toRotationMatrix();
+  const Mat3<T> rotation_thigh =
+    Eigen::AngleAxis<T>(
+    mechanical_q(1), leg.joints.joint_axes.col(1)).toRotationMatrix();
+  const Mat3<T> rotation_calf =
+    Eigen::AngleAxis<T>(
+    mechanical_q(2), leg.joints.joint_axes.col(2)).toRotationMatrix();
+  const Vec3<T> hip_origin = Vec3<T>::Zero();
+  const Vec3<T> thigh_origin = rotation_hip * leg.hip_to_thigh;
+  const Mat3<T> hip_thigh_rotation = rotation_hip * rotation_thigh;
+  const Vec3<T> calf_origin =
+    thigh_origin + hip_thigh_rotation * leg.thigh_to_calf;
+  const Vec3<T> foot_position = calf_origin +
+    hip_thigh_rotation * rotation_calf * leg.calf_to_foot;
 
-  // 调用方传入 J 地址时才计算雅可比；J 的第 j 列表示第 j 个关节以
-  // 1 rad/s 转动时产生的足端线速度，三行依次对应 x、y、z。
   if (J != nullptr) {
-    // 第一行：足端 x 方向速度分别对 Hip、thigh、calf 角速度的偏导。
-    (*J)(0, 0) = T(0);
-    // MuJoCo/WBC 均采用绕 +Y 轴的右手旋转；向下连杆在正转角下朝 -x。
-    (*J)(0, 1) = -l3 * c23 - l2 * c2;
-    (*J)(0, 2) = -l3 * c23;
-    // 第二行：足端 y 方向速度对三个关节角速度的偏导。
-    (*J)(1, 0) = l3 * c1 * c23 + l2 * c1 * c2 - l1 * side_sign * s1;
-    (*J)(1, 1) = -l3 * s1 * s23 - l2 * s1 * s2;
-    (*J)(1, 2) = -l3 * s1 * s23;
-    // 第三行：足端 z 方向速度对三个关节角速度的偏导。
-    (*J)(2, 0) = l3 * s1 * c23 + l2 * c2 * s1 + l1 * side_sign * c1;
-    (*J)(2, 1) = l3 * c1 * s23 + l2 * c1 * s2;
-    (*J)(2, 2) = l3 * c1 * s23;
+    const Vec3<T> hip_axis = leg.joints.joint_axes.col(0);
+    const Vec3<T> thigh_axis = rotation_hip * leg.joints.joint_axes.col(1);
+    const Vec3<T> calf_axis =
+      hip_thigh_rotation * leg.joints.joint_axes.col(2);
+    J->col(0) = hip_axis.cross(foot_position - hip_origin);
+    J->col(1) = thigh_axis.cross(foot_position - thigh_origin);
+    J->col(2) = calf_axis.cross(foot_position - calf_origin);
   }
-
-  // 调用方传入 p 地址时才计算足端位置；三个分量依次为 x、y、z。
-  if (p != nullptr) {
-    // x 主要由 thigh/calf 两个俯仰关节决定。
-    (*p)(0) = -l3 * s23 - l2 * s2;
-    // y 同时受到 Hip 外展角和左右腿横向镜像的影响。
-    (*p)(1) = l1 * side_sign * c1 + l3 * s1 * c23 + l2 * c2 * s1;
-    // z 向上为正，因此正常站立时该值通常为负。
-    (*p)(2) = l1 * side_sign * s1 - l3 * c1 * c23 - l2 * c1 * c2;
-  }
+  if (p != nullptr) {*p = foot_position;}
 }
 
 // 模板实现放在 .cpp 中，因此需要显式生成项目当前实际使用的 float 版本。

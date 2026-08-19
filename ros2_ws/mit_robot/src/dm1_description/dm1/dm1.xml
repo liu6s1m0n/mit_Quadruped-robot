@@ -1,0 +1,174 @@
+<mujoco model="dm1">
+  <!-- DM1 parameters and meshes originate from legged_damiao_description/dmgo. -->
+  <compiler angle="radian" meshdir="assets" autolimits="true" balanceinertia="true"/>
+  <option timestep="0.002" cone="elliptic" impratio="100"/>
+
+  <default>
+    <default class="dm1">
+      <geom friction="0.6" margin="0.001" condim="1"/>
+      <joint damping="1" armature="0.01" frictionloss="0.1"/>
+      <position kp="100"/>
+      <default class="haa">
+        <joint axis="1 0 0" range="-1.57 1.57"/>
+        <position ctrlrange="-1.57 1.57" forcerange="-52.4 52.4"/>
+      </default>
+      <default class="hfe">
+        <joint axis="0 1 0"/>
+        <position forcerange="-55 55"/>
+      </default>
+      <default class="kfe">
+        <!-- q=0 对应最低深蹲的机械小腿角 -2.25 rad。 -->
+        <joint axis="0 1 0" ref="2.25" range="0 2.75"/>
+        <position ctrlrange="0 2.75" forcerange="-55 55"/>
+      </default>
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2" material="dm_dark"/>
+      </default>
+      <default class="foot">
+        <geom type="sphere" size="0.02" priority="1" condim="6"
+          friction="0.8 0.02 0.01" solref="0.008 1.5" solimp="0.9 0.95 0.001"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="dm_dark" rgba="0.25 0.25 0.25 1"/>
+    <material name="dm_orange" rgba="0.95 0.32 0.05 1"/>
+    <mesh name="dm_base" file="base.STL"/>
+    <mesh name="FR_hip_mesh" file="RF_hip.STL"/><mesh name="FR_thigh_mesh" file="RF_thigh.STL"/>
+    <mesh name="FR_calf_mesh" file="RF_calf.STL"/><mesh name="FR_foot_mesh" file="RF_FOOT.STL"/>
+    <mesh name="FL_hip_mesh" file="LF_hip.STL"/><mesh name="FL_thigh_mesh" file="LF_thigh.STL"/>
+    <mesh name="FL_calf_mesh" file="LF_calf.STL"/><mesh name="FL_foot_mesh" file="LF_FOOT.STL"/>
+    <mesh name="RR_hip_mesh" file="RH_hip.STL"/><mesh name="RR_thigh_mesh" file="RH_thigh.STL"/>
+    <mesh name="RR_calf_mesh" file="RH_calf.STL"/><mesh name="RR_foot_mesh" file="RH_FOOT.STL"/>
+    <mesh name="RL_hip_mesh" file="LH_hip.STL"/><mesh name="RL_thigh_mesh" file="LH_thigh.STL"/>
+    <mesh name="RL_calf_mesh" file="LH_calf.STL"/><mesh name="RL_foot_mesh" file="LH_FOOT.STL"/>
+  </asset>
+
+  <worldbody>
+    <light name="spotlight" mode="targetbodycom" target="trunk" pos="0 -1 2"/>
+    <body name="trunk" pos="0 0 0.395" childclass="dm1">
+      <freejoint/>
+      <camera name="tracking" mode="trackcom" pos="0 -1 0.8" xyaxes="1 0 0 0 1 1"/>
+      <site name="imu" pos="0 0 -0.03"/>
+      <inertial pos="-0.001955 0.002743 -0.068608" mass="6.889103"
+        fullinertia="0.035976 0.081109 0.103076 0.000077 -0.000148 0.000272"/>
+      <geom class="visual" mesh="dm_base"/>
+      <geom name="trunk_collision" type="box" size="0.14 0.09 0.05" pos="0 0 -0.069779"/>
+
+      <body name="FR_hip" pos="0.16175 -0.059997 -0.061498">
+        <joint class="haa" name="FR_hip_joint"/>
+        <inertial pos="0.04756 0.010434 -0.000046" mass="0.706316" diaginertia="0.000403 0.000535 0.000446"/>
+        <geom class="visual" mesh="FR_hip_mesh"/>
+        <body name="FR_thigh" pos="0.049998 -0.019503 0">
+          <joint class="hfe" name="FR_thigh_joint" ref="0.203" range="-1.367 2.603"/>
+          <inertial pos="-0.023554 -0.050542 0.001956" mass="0.977146" diaginertia="0.000887 0.003756 0.003918"/>
+          <geom class="visual" mesh="FR_thigh_mesh" material="dm_orange"/>
+          <geom type="capsule" size="0.018" fromto="0 0 0 -0.2 -0.07825 0"/>
+          <body name="FR_calf" pos="-0.2 -0.07825 0">
+            <joint class="kfe" name="FR_calf_joint"/>
+            <inertial pos="-0.010235 0.000248 -0.054204" mass="0.240236" diaginertia="0.000969 0.005316 0.004359"/>
+            <geom class="visual" mesh="FR_calf_mesh"/>
+            <geom type="capsule" size="0.012" fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <geom name="FR_home_calf_contact" type="capsule" size="0.018"
+              fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <body name="FR_foot" pos="-0.17362 0 -0.14312">
+              <inertial pos="-0.000269 0.0002 -0.000005" mass="0.030285" diaginertia="0.000008 0.000005 0.000008"/>
+              <geom class="visual" mesh="FR_foot_mesh"/><geom name="FR" class="foot"/>
+            </body>
+          </body>
+        </body>
+      </body>
+
+      <body name="FL_hip" pos="0.16175 0.059997 -0.061498">
+        <joint class="haa" name="FL_hip_joint"/>
+        <inertial pos="0.04756 -0.010434 -0.000046" mass="0.706316" diaginertia="0.000403 0.000535 0.000446"/>
+        <geom class="visual" mesh="FL_hip_mesh"/>
+        <body name="FL_thigh" pos="0.049998 0.019503 0">
+          <joint class="hfe" name="FL_thigh_joint" ref="0.203" range="-1.367 2.603"/>
+          <inertial pos="-0.023554 0.050542 0.001956" mass="0.977146" diaginertia="0.000887 0.003756 0.003918"/>
+          <geom class="visual" mesh="FL_thigh_mesh" material="dm_orange"/>
+          <geom type="capsule" size="0.018" fromto="0 0 0 -0.2 0.07825 0"/>
+          <body name="FL_calf" pos="-0.2 0.07825 0">
+            <joint class="kfe" name="FL_calf_joint"/>
+            <inertial pos="-0.010235 0.000248 -0.054204" mass="0.240236" diaginertia="0.000969 0.005316 0.004359"/>
+            <geom class="visual" mesh="FL_calf_mesh"/>
+            <geom type="capsule" size="0.012" fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <geom name="FL_home_calf_contact" type="capsule" size="0.018"
+              fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <body name="FL_foot" pos="-0.17362 0 -0.14312">
+              <inertial pos="-0.000269 -0.0002 -0.000005" mass="0.030285" diaginertia="0.000008 0.000005 0.000008"/>
+              <geom class="visual" mesh="FL_foot_mesh"/><geom name="FL" class="foot"/>
+            </body>
+          </body>
+        </body>
+      </body>
+
+      <body name="RR_hip" pos="-0.16175 -0.059997 -0.061498">
+        <joint class="haa" name="RR_hip_joint"/>
+        <inertial pos="-0.04756 0.010434 -0.000046" mass="0.706316" diaginertia="0.000403 0.000535 0.000446"/>
+        <geom class="visual" mesh="RR_hip_mesh"/>
+        <body name="RR_thigh" pos="-0.049998 -0.019503 0">
+          <joint class="hfe" name="RR_thigh_joint" ref="0.203" range="-1.367 2.603"/>
+          <inertial pos="-0.023554 -0.050542 0.001956" mass="0.977146" diaginertia="0.000887 0.003756 0.003918"/>
+          <geom class="visual" mesh="RR_thigh_mesh" material="dm_orange"/>
+          <geom type="capsule" size="0.018" fromto="0 0 0 -0.2 -0.07825 0"/>
+          <body name="RR_calf" pos="-0.2 -0.07825 0">
+            <joint class="kfe" name="RR_calf_joint"/>
+            <inertial pos="-0.010235 0.000248 -0.054204" mass="0.240236" diaginertia="0.000969 0.005316 0.004359"/>
+            <geom class="visual" mesh="RR_calf_mesh"/>
+            <geom type="capsule" size="0.012" fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <geom name="RR_home_calf_contact" type="capsule" size="0.018"
+              fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <body name="RR_foot" pos="-0.17362 0 -0.14312">
+              <inertial pos="-0.000269 0.0002 -0.000005" mass="0.030285" diaginertia="0.000008 0.000005 0.000008"/>
+              <geom class="visual" mesh="RR_foot_mesh"/><geom name="RR" class="foot"/>
+            </body>
+          </body>
+        </body>
+      </body>
+
+      <body name="RL_hip" pos="-0.16175 0.059997 -0.061498">
+        <joint class="haa" name="RL_hip_joint"/>
+        <inertial pos="-0.04756 -0.010434 -0.000046" mass="0.706316" diaginertia="0.000403 0.000535 0.000446"/>
+        <geom class="visual" mesh="RL_hip_mesh"/>
+        <body name="RL_thigh" pos="-0.049998 0.019503 0">
+          <joint class="hfe" name="RL_thigh_joint" ref="0.203" range="-1.367 2.603"/>
+          <inertial pos="-0.023554 0.050542 0.001956" mass="0.977146" diaginertia="0.000887 0.003756 0.003918"/>
+          <geom class="visual" mesh="RL_thigh_mesh" material="dm_orange"/>
+          <geom type="capsule" size="0.018" fromto="0 0 0 -0.2 0.07825 0"/>
+          <body name="RL_calf" pos="-0.2 0.07825 0">
+            <joint class="kfe" name="RL_calf_joint"/>
+            <inertial pos="-0.010235 0.000248 -0.054204" mass="0.240236" diaginertia="0.000969 0.005316 0.004359"/>
+            <geom class="visual" mesh="RL_calf_mesh"/>
+            <geom type="capsule" size="0.012" fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <geom name="RL_home_calf_contact" type="capsule" size="0.018"
+              fromto="0 0 0 -0.17362 0 -0.14312"/>
+            <body name="RL_foot" pos="-0.17362 0 -0.14312">
+              <inertial pos="-0.000269 -0.0002 -0.000005" mass="0.030285" diaginertia="0.000008 0.000005 0.000008"/>
+              <geom class="visual" mesh="RL_foot_mesh"/><geom name="RL" class="foot"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position class="haa" name="FR_hip" joint="FR_hip_joint"/><position class="hfe" name="FR_thigh" joint="FR_thigh_joint" ctrlrange="-1.367 2.603"/><position class="kfe" name="FR_calf" joint="FR_calf_joint"/>
+    <position class="haa" name="FL_hip" joint="FL_hip_joint"/><position class="hfe" name="FL_thigh" joint="FL_thigh_joint" ctrlrange="-1.367 2.603"/><position class="kfe" name="FL_calf" joint="FL_calf_joint"/>
+    <position class="haa" name="RR_hip" joint="RR_hip_joint"/><position class="hfe" name="RR_thigh" joint="RR_thigh_joint" ctrlrange="-1.367 2.603"/><position class="kfe" name="RR_calf" joint="RR_calf_joint"/>
+    <position class="haa" name="RL_hip" joint="RL_hip_joint"/><position class="hfe" name="RL_thigh" joint="RL_thigh_joint" ctrlrange="-1.367 2.603"/><position class="kfe" name="RL_calf" joint="RL_calf_joint"/>
+  </actuator>
+  <sensor>
+    <framequat name="imu_orientation" objtype="site" objname="imu"/>
+    <gyro name="imu_angular_velocity" site="imu"/>
+    <accelerometer name="imu_linear_acceleration" site="imu"/>
+  </sensor>
+  <keyframe>
+    <!-- DM1 的 home 是正常站姿沿竖直方向降到底的最低深蹲：腹部和
+         四只脚同时接近地面，十二个电机角均为 0。 -->
+    <key name="home" qpos="0 0 0.12 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+      ctrl="0 0 0 0 0 0 0 0 0 0 0 0"/>
+  </keyframe>
+</mujoco>

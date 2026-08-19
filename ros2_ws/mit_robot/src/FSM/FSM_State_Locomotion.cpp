@@ -36,15 +36,18 @@ FSM_State_Locomotion<T>::FSM_State_Locomotion(
   // 默认姿态环 Kp=50、Kd=1 在对角支撑切换时阻尼不足，前进地面力作用于
   // 质心下方后产生的俯仰无法及时衰减。提高 roll/pitch 恢复力和角速度阻尼，
   // yaw 保持较温和，避免改变航向响应。
+  const auto & parameters = *control_fsm_data->control_parameters;
+  // 两种机型独立设置行走增益、抬脚高度和横向安全边界。DM1 使用较低摆幅
+  // 以减小惯性滚转，并按更宽的机械足距放宽边界。
+  swing_height_ = parameters.locomotion_swing_height;
+  maximum_lateral_foot_offset_ =
+    parameters.locomotion_max_lateral_foot_offset;
   wbc_ctrl_->setBodyOrientationGains(
-    Vec3<T>(T(100), T(100), T(50)),
-    Vec3<T>(T(10), T(10), T(3)));
-  // 行走关节 PD 按电机职责分别设置：Hip 保持Kp=30，避免四腿向机身
-  // 内侧快速收缩；thigh/calf使用Kp=42跟随高速摆动轨迹。
-  // Kd=[4,4.5,4.5]提供适量阻尼；继续加硬会让落脚过冲并造成小腿擦地。
+    parameters.locomotion_body_orientation_kp,
+    parameters.locomotion_body_orientation_kd);
   wbc_ctrl_->setJointGains(
-    Vec3<T>(T(30), T(42), T(42)),
-    Vec3<T>(T(4), T(4.5), T(4.5)));
+    parameters.locomotion_joint_kp, parameters.locomotion_joint_kd);
+  wbc_ctrl_->setMaxNormalForce(parameters.maximum_normal_force);
   //安全检查
   this->turnOnAllSafetyChecks();
   this->checkPDesFoot = false;
@@ -168,11 +171,16 @@ bool FSM_State_Locomotion<T>::locomotionSafe() const
     return false;
   }
   
-  /*abs(data.p[1]) > 0.18 足端横向偏移不能超过 18 cm。
+  // GO1 名义足宽较窄，18 cm 足端横向边界足够；DM1 的 HAA 到足端本身已有
+  // 9.8 cm 横向偏置，全速横移落点约为 18.5 cm。继续套用 GO1 的固定边界
+  // 会让 FSM 在横移中反复退回站立并重置接触相位，因此 DM1 使用 24 cm，
+  // 仍远小于其 42.5 cm 最大腿长。
+  /*abs(data.p[1]) 超过机型横向安全边界时拒绝继续行走。
     data.v.norm() > 9  足端速度不能超过 9 m/s。如果超过，通常表示：*/
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
     const auto & data = this->_data->leg_controller->datas[leg];
-    if (!data.valid || data.p.z() > T(0) || std::abs(data.p.y()) > T(0.18) ||
+    if (!data.valid || data.p.z() > T(0) ||
+      std::abs(data.p.y()) > maximum_lateral_foot_offset_ ||
       data.v.norm() > T(9))
     {
       return false;

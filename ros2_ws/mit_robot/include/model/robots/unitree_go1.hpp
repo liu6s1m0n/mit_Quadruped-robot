@@ -46,6 +46,9 @@ LegModelParameters<T> makeLeg(
   result.hip_link_length = T(0.08);
   result.thigh_link_length = T(0.213);
   result.calf_link_length = T(0.213);
+  result.hip_to_thigh = Vec3<T>(T(0), is_left ? T(0.08) : T(-0.08), T(0));
+  result.thigh_to_calf = Vec3<T>(T(0), T(0), T(-0.213));
+  result.calf_to_foot = Vec3<T>(T(0), T(0), T(-0.213));
   result.foot_radius = T(0.023);
   result.foot_friction << T(0.8), T(0.02), T(0.01);
   result.joints = makeJointParameters<T>();

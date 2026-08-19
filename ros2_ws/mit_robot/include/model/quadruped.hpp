@@ -54,6 +54,7 @@ struct JointModelParameters
   Vec3<T> damping = Vec3<T>::Zero();          ///< 关节粘性阻尼
   Vec3<T> friction_loss = Vec3<T>::Zero();    ///< 关节库仑摩擦
   Vec3<T> armature = Vec3<T>::Zero();         ///< 折算到关节侧的转子惯量
+  Vec3<T> zero_offset = Vec3<T>::Zero();      ///< 电机读数 0 对应的机械关节角，rad
   Vec3<T> home_position = Vec3<T>::Zero();    ///< 默认站立关节角，rad
   Mat3<T> joint_axes = Mat3<T>::Zero();       ///< 每列为对应关节的局部转轴
 
@@ -62,7 +63,8 @@ struct JointModelParameters
     return lower_limit.allFinite() && upper_limit.allFinite() &&
            velocity_limit.allFinite() && torque_limit.allFinite() &&
            damping.allFinite() && friction_loss.allFinite() &&
-           armature.allFinite() && home_position.allFinite() &&
+           armature.allFinite() && zero_offset.allFinite() &&
+           home_position.allFinite() &&
            joint_axes.allFinite() &&
            (lower_limit.array() < upper_limit.array()).all() &&
            (velocity_limit.array() > T(0)).all() &&
@@ -83,6 +85,9 @@ struct LegModelParameters
   T hip_link_length = T(0);                     ///< Hip 横向连杆长度，m
   T thigh_link_length = T(0);                   ///< 大腿长度，m
   T calf_link_length = T(0);                    ///< 小腿长度，m
+  Vec3<T> hip_to_thigh = Vec3<T>::Zero();       ///< HAA 到 HFE 关节原点的位移，m。
+  Vec3<T> thigh_to_calf = Vec3<T>::Zero();      ///< HFE 到 KFE 关节原点的位移，m。
+  Vec3<T> calf_to_foot = Vec3<T>::Zero();       ///< KFE 到足端接触点的位移，m。
   T foot_radius = T(0);                         ///< 足端碰撞球半径，m
   Vec3<T> foot_friction = Vec3<T>::Zero();      ///< 滑动、扭转、滚动摩擦
 
@@ -93,6 +98,8 @@ struct LegModelParameters
 
   T maximumLegLength() const
   {
+    // 保留控制器原先使用的标称连杆长度和，避免 GO1 的安全边界因
+    // 向量求模产生微小浮点差异；DM1 也会为这两个标量填写实测长度。
     return thigh_link_length + calf_link_length;
   }
 
@@ -100,6 +107,9 @@ struct LegModelParameters
   {
     return hip_location_body.allFinite() && hip_link_length > T(0) &&
            thigh_link_length > T(0) && calf_link_length > T(0) &&
+           hip_to_thigh.allFinite() && thigh_to_calf.allFinite() &&
+           calf_to_foot.allFinite() && thigh_to_calf.norm() > T(0) &&
+           calf_to_foot.norm() > T(0) &&
            foot_radius > T(0) && foot_friction.allFinite() &&
            hip_inertia.isValid() && thigh_inertia.isValid() &&
            calf_inertia.isValid() && joints.isValid();

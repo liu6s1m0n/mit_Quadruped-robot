@@ -20,26 +20,24 @@ FSM_State_FrontJump<T>::FSM_State_FrontJump(
       return std::max<std::size_t>(
         1, static_cast<std::size_t>(std::ceil(duration / dt)));
     };
-  crouch_iterations_ = cycles(T(0.18));
-  thrust_iterations_ = cycles(T(0.18));
-  tuck_iterations_ = cycles(T(0.17));
-  landing_iterations_ = cycles(T(0.25));
+  const auto & parameters = *control_fsm_data->control_parameters;
+  crouch_iterations_ = cycles(parameters.jump_crouch_duration);
+  thrust_iterations_ = cycles(parameters.jump_thrust_duration);
+  tuck_iterations_ = cycles(parameters.jump_tuck_duration);
+  landing_iterations_ = cycles(parameters.jump_landing_duration);
 
   for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
-    // 预蹲储能；蹬伸时足端相对髋部向后，使地面反力带来向前冲量。
-    crouch_positions_[leg] << T(0), T(1.22), T(-2.42);
+    // 每个机型使用自己的关节方向和限位；DM1 不再套用 GO1 的正大腿角轨迹。
+    const auto & joints = control_fsm_data->quadruped->leg(
+      static_cast<LegId>(leg)).joints;
+    crouch_positions_[leg] = parameters.jump_crouch_position - joints.zero_offset;
     const bool front_leg = leg == static_cast<std::size_t>(LegId::FR) ||
       leg == static_cast<std::size_t>(LegId::FL);
-    if (front_leg) {
-      // 前腿足端更多向后扫，增加水平推进并减少造成过大俯仰的竖直冲量。
-      thrust_positions_[leg] << T(0), T(1.20), T(-1.25);
-    } else {
-      // 后腿保留更多竖直支撑，产生与实测负向俯仰相反的校正力矩。
-      thrust_positions_[leg] << T(0), T(1.10), T(-1.20);
-    }
-    tuck_positions_[leg] << T(0), T(1.12), T(-2.24);
-    landing_positions_[leg] =
-      control_fsm_data->quadruped->leg(static_cast<LegId>(leg)).joints.home_position;
+    thrust_positions_[leg] = front_leg ?
+      parameters.jump_front_thrust_position - joints.zero_offset :
+      parameters.jump_rear_thrust_position - joints.zero_offset;
+    tuck_positions_[leg] = parameters.jump_tuck_position - joints.zero_offset;
+    landing_positions_[leg] = joints.home_position;
   }
 }
 
@@ -108,6 +106,7 @@ void FSM_State_FrontJump<T>::applyTrajectory(
 template<typename T>
 void FSM_State_FrontJump<T>::run()
 {
+  const auto & parameters = *this->_data->control_parameters;
   const std::size_t crouch_end = crouch_iterations_;
   const std::size_t thrust_end = crouch_end + thrust_iterations_;
   const std::size_t tuck_end = thrust_end + tuck_iterations_;
@@ -116,25 +115,29 @@ void FSM_State_FrontJump<T>::run()
   if (iteration_ < crouch_end) {
     applyTrajectory(
       initial_positions_, crouch_positions_, iteration_, crouch_iterations_,
-      T(48), T(5));
+      parameters.jump_crouch_kp, parameters.jump_crouch_kd);
   } else if (iteration_ < thrust_end) {
     applyTrajectory(
       crouch_positions_, thrust_positions_, iteration_ - crouch_end,
-      thrust_iterations_, T(70), T(4));
+      thrust_iterations_, parameters.jump_thrust_kp, parameters.jump_thrust_kd);
   } else if (iteration_ < tuck_end) {
     applyTrajectory(
       thrust_positions_, tuck_positions_, iteration_ - thrust_end,
-      tuck_iterations_, T(32), T(3));
+      tuck_iterations_, parameters.jump_tuck_kp, parameters.jump_tuck_kd);
   } else {
     applyTrajectory(
       tuck_positions_, landing_positions_, iteration_ - tuck_end,
-      landing_iterations_, T(38), T(5));
+      landing_iterations_, parameters.jump_landing_kp,
+      parameters.jump_landing_kd);
     // 落地阶段用 IMU 俯仰和俯仰角速度做有限幅差动腿长修正。当前坐标约定下
     // 负 pitch 为抬头：缩短前腿、伸长后腿可抑制继续后翻；正 pitch 反向处理。
     const T pitch = this->_data->state_estimate->rpy.y();
     const T pitch_rate = this->_data->state_estimate->angular_velocity_body.y();
     const T correction = std::clamp(
-      -T(0.35) * pitch - T(0.06) * pitch_rate, T(-0.12), T(0.12));
+      -parameters.jump_pitch_position_gain * pitch -
+      parameters.jump_pitch_velocity_gain * pitch_rate,
+      -parameters.jump_pitch_correction_limit,
+      parameters.jump_pitch_correction_limit);
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
       const bool front_leg = leg == static_cast<std::size_t>(LegId::FR) ||
         leg == static_cast<std::size_t>(LegId::FL);
@@ -146,8 +149,8 @@ void FSM_State_FrontJump<T>::run()
         static_cast<LegId>(leg)).joints;
       command.position_desired = command.position_desired.cwiseMax(
         limits.lower_limit).cwiseMin(limits.upper_limit);
-      command.kp_joint.setConstant(T(44));
-      command.kd_joint.setConstant(T(6));
+      command.kp_joint.setConstant(parameters.jump_landing_kp);
+      command.kd_joint.setConstant(parameters.jump_landing_kd);
     }
   }
 

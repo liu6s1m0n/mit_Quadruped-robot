@@ -37,7 +37,7 @@ public:
 
   void run() override
   {
-    // 简单关节 PD 状态将四条腿保持在模型定义的默认姿态。
+    // GO1 的 JointPD 保持默认站姿；DM1 的上电 JointPD 保持趴卧电机零位。
     auto & controller = *this->_data->leg_controller;
     controller.zeroCommand();
     controller.setEnabled(true);
@@ -45,9 +45,17 @@ public:
     for (std::size_t leg = 0; leg < kNumLegs; ++leg) {
       const LegId leg_id = static_cast<LegId>(leg);
       controller.commands[leg].position_desired =
+        this->_data->control_parameters->start_in_prone_home ?
+        this->_data->control_parameters->motor_zero_position :
         this->_data->quadruped->leg(leg_id).joints.home_position;
-      controller.commands[leg].kp_joint.setConstant(T(20));
-      controller.commands[leg].kd_joint.setConstant(T(2));
+      controller.commands[leg].kp_joint =
+        this->_data->control_parameters->start_in_prone_home ?
+        this->_data->control_parameters->prone_home_joint_kp :
+        this->_data->control_parameters->balance_joint_kp;
+      controller.commands[leg].kd_joint =
+        this->_data->control_parameters->start_in_prone_home ?
+        this->_data->control_parameters->prone_home_joint_kd :
+        this->_data->control_parameters->balance_joint_kd;
     }
   }
   
@@ -80,7 +88,10 @@ ControlFSM<T>::ControlFSM(
   LegController<T> & leg_controller, GaitScheduler<T> & gait_scheduler,
   DesiredState<T> & desired_state, T control_time_step)
 {
+  control_parameters_ = std::make_unique<RobotControlParameters<T>>(
+    makeRobotControlParameters<T>(quadruped.robotType()));
   data.quadruped = &quadruped;
+  data.control_parameters = control_parameters_.get();
   data.state_estimate = &state_estimate;
   data.joint_states = &joint_states;
   data.leg_controller = &leg_controller;

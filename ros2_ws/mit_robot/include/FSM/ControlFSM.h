@@ -92,11 +92,12 @@ public:
   TransitionData < T > transitionData;
 
 private:
-  std::unique_ptr < SafetyChecker < T >> safety_checker_;
-  FSM_OperatingMode operating_mode_ = FSM_OperatingMode::NORMAL;
-  std::size_t print_num_ = 10000;
-  std::size_t print_iteration_ = 0;
-  std::size_t iteration_ = 0;
+  std::unique_ptr<RobotControlParameters<T>> control_parameters_;  ///< 当前机型独立控制参数。
+  std::unique_ptr < SafetyChecker < T >> safety_checker_;  ///< 状态切换前后共用的安全检查器。
+  FSM_OperatingMode operating_mode_ = FSM_OperatingMode::NORMAL;  ///< 当前正常、过渡、急停或阻尼模式。
+  std::size_t print_num_ = 10000;       ///< 两次周期性状态日志之间的控制周期数。
+  std::size_t print_iteration_ = 0;     ///< 距离上次周期性日志经过的周期数。
+  std::size_t iteration_ = 0;           ///< FSM 启动以来累计执行的控制周期数。
 };
 
 extern template class ControlFSM < float >;
